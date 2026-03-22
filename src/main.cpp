@@ -2,6 +2,9 @@
 #include <NimBLEDevice.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <HTTPClient.h>
+#include <Preferences.h>
+#include <algorithm>
 
 #include <deque>
 #include <vector>
@@ -21,6 +24,11 @@ struct DiscoveredDevice {
     bool pairableNow;
 };
 
+struct KeyMapping {
+    uint8_t keyCode;
+    String path;
+};
+
 WebServer server(80);
 
 static NimBLEClient* gClient = nullptr;
@@ -37,6 +45,21 @@ static String gPreferredBondedName = "";
 static unsigned long gLastAutoConnectAttemptMs = 0;
 static const unsigned long AUTO_CONNECT_INTERVAL_MS = 8000;
 
+static Preferences gPrefs;
+static String gBaseUrl = "";
+static String gWifiSsid = "";
+static String gWifiPassword = "";
+static std::vector<KeyMapping> gKeyMappings;
+static uint8_t gLastKeyCode = 0;
+static std::deque<uint8_t> gPendingKeyCodes;
+static bool gConfigMode = true;
+static uint8_t gLastDispatchedKeyCode = 0;
+static unsigned long gLastDispatchMs = 0;
+
+static const uint8_t CONFIG_BUTTON_PIN = D9;
+static const unsigned long CONFIG_BUTTON_HOLD_MS = 800;
+static const unsigned long KEY_REPEAT_FILTER_MS = 120;
+
 void addKeyLog(const String& line);
 bool isBondedAddress(const String& address);
 void logConnectionSecurity(const String& prefix);
@@ -49,6 +72,22 @@ void refreshPreferredBondedDevice();
 void maybeAutoConnectBondedKeyboard();
 bool isAdvertisedAsPairingMode(NimBLEAdvertisedDevice& d);
 bool canPairDeviceNow(const String& address, String& reason);
+void loadConfig();
+void saveConfig();
+String configJson();
+bool hasValidRunConfig();
+bool isConfigButtonHeldOnBoot();
+String mappedPathForKey(uint8_t keyCode);
+void queueKeyPress(uint8_t keyCode);
+void dispatchKeyHttp(uint8_t keyCode);
+void processPendingKeys();
+void handleConfigGet();
+void handleSetUrl();
+void handleSetWifi();
+void handleSetMapping();
+void handleDelMapping();
+void handleReboot();
+void handleFactoryReset();
 
 class SecurityCallbacks : public NimBLESecurityCallbacks {
   uint32_t onPassKeyRequest() override {
@@ -229,14 +268,119 @@ void addKeyLog(const String& line) {
     return false;
   }
 
+bool hasValidRunConfig() {
+  if (gWifiSsid.length() == 0) {
+    return false;
+  }
+  if (gBaseUrl.length() == 0) {
+    return false;
+  }
+  if (gKeyMappings.empty()) {
+    return false;
+  }
+  if (gPreferredBondedAddress.length() == 0) {
+    return false;
+  }
+  return true;
+}
+
+bool isConfigButtonHeldOnBoot() {
+  pinMode(CONFIG_BUTTON_PIN, INPUT);
+  if (digitalRead(CONFIG_BUTTON_PIN) == HIGH) {
+    unsigned long started = millis();
+    while (millis() - started < CONFIG_BUTTON_HOLD_MS) {
+      if (digitalRead(CONFIG_BUTTON_PIN) == LOW) {
+        return false; // released before hold time
+      }
+      delay(10);
+    }
+    return true; // stayed HIGH for full hold period
+  }
+  return false;
+}
+
+String mappedPathForKey(uint8_t keyCode) {
+  for (const KeyMapping& m : gKeyMappings) {
+    if (m.keyCode == keyCode) {
+      return m.path;
+    }
+  }
+  return "";
+}
+
+void queueKeyPress(uint8_t keyCode) {
+  if (keyCode == 0) {
+    return;
+  }
+  if (gPendingKeyCodes.size() >= 24) {
+    gPendingKeyCodes.pop_front();
+  }
+  gPendingKeyCodes.push_back(keyCode);
+}
+
+void dispatchKeyHttp(uint8_t keyCode) {
+  String path = mappedPathForKey(keyCode);
+  if (path.length() == 0) {
+    return;
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    addKeyLog("HTTP skipped: WiFi not connected");
+    return;
+  }
+
+  String url = gBaseUrl;
+  bool baseHasSlash = url.endsWith("/");
+  bool pathHasSlash = path.startsWith("/");
+  if (baseHasSlash && pathHasSlash) {
+    url.remove(url.length() - 1);
+  } else if (!baseHasSlash && !pathHasSlash) {
+    url += "/";
+  }
+  url += path;
+
+  HTTPClient http;
+  if (!http.begin(url)) {
+    addKeyLog(String("HTTP begin failed: ") + url);
+    return;
+  }
+
+  int rc = http.GET();
+  if (rc > 0) {
+    addKeyLog(String("HTTP GET ") + url + String(" -> ") + String(rc));
+  } else {
+    addKeyLog(String("HTTP GET failed: ") + HTTPClient::errorToString(rc));
+  }
+  http.end();
+}
+
+void processPendingKeys() {
+  while (!gPendingKeyCodes.empty()) {
+    uint8_t keyCode = gPendingKeyCodes.front();
+    gPendingKeyCodes.pop_front();
+
+    unsigned long now = millis();
+    if (keyCode == gLastDispatchedKeyCode && (now - gLastDispatchMs) < KEY_REPEAT_FILTER_MS) {
+      continue;
+    }
+
+    gLastDispatchedKeyCode = keyCode;
+    gLastDispatchMs = now;
+    dispatchKeyHttp(keyCode);
+  }
+}
+
 static void notifyCallback(NimBLERemoteCharacteristic* pRemoteCharacteristic,
                            uint8_t* pData,
                            size_t length,
                            bool isNotify) {
+    (void)pRemoteCharacteristic;
     if (!isNotify || length < 3) return;
     // HID report: byte 0 = modifiers, byte 1 = reserved, bytes 2-7 = keycodes
     for (int i = 2; i < (int)length && i < 8; i++) {
         if (pData[i] != 0) {
+            gLastKeyCode = pData[i];
+          queueKeyPress(pData[i]);
             Serial.write(pData[i]);
             String line = "KEY 0x";
             if (pData[i] < 0x10) line += "0";
@@ -649,6 +793,12 @@ void handleState() {
     out += ",\"address\":\"" + jsonEscape(gConnectedAddress) + "\"";
     out += ",\"bondedAddress\":\"" + jsonEscape(gPreferredBondedAddress) + "\"";
     out += ",\"bondedName\":\"" + jsonEscape(gPreferredBondedName) + "\"";
+    out += ",\"lastKey\":\"";
+    if (gLastKeyCode > 0) {
+        if (gLastKeyCode < 0x10) out += "0";
+        out += String(gLastKeyCode, HEX);
+    }
+    out += "\"";
     out += ",\"keys\":" + keyLogJson();
     out += "}";
     server.send(200, "application/json", out);
@@ -761,6 +911,12 @@ const char PAGE[] PROGMEM = R"HTML(
       .log { height: 220px; }
       li { flex-direction: column; align-items: flex-start; }
     }
+    input[type=text] { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 0.95rem; background: #f8faf9; color: var(--ink); }
+    .cfg-label { font-weight: 700; display: block; margin-bottom: 6px; }
+    .cfg-section { margin-bottom: 16px; }
+    .mapping-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+    .mapping-row:last-child { border-bottom: none; }
+    .captured-box { background: #eef4f1; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-family: Consolas, monospace; font-size: 0.95rem; min-width: 70px; text-align: center; }
   </style>
 </head>
 <body>
@@ -781,6 +937,52 @@ const char PAGE[] PROGMEM = R"HTML(
     <div class="card" id="bondedCard" style="display:none">
       <h2>Bonded Device</h2>
       <div id="bondedInfo"></div>
+    </div>
+
+    <div class="card">
+      <h2>Key Mapping Configuration</h2>
+      <div class="cfg-section">
+        <label class="cfg-label">WiFi Router</label>
+        <div class="row" style="gap:8px;margin-bottom:8px">
+          <input type="text" id="wifiSsidInput" placeholder="SSID" style="flex:1" />
+          <input type="text" id="wifiPwdInput" placeholder="Password" style="flex:1" />
+          <button onclick="saveWifi()">Save WiFi</button>
+        </div>
+      </div>
+      <div class="cfg-section">
+        <label class="cfg-label">Base URL</label>
+        <div class="row" style="gap:8px">
+          <input type="text" id="baseUrlInput" placeholder="http://192.168.x.x:8080" style="flex:1" />
+          <button onclick="saveBaseUrl()">Save URL</button>
+        </div>
+      </div>
+      <div class="cfg-section">
+        <label class="cfg-label">Assign a Key</label>
+        <div class="row" style="margin-bottom:8px;gap:8px">
+          <button id="captureBtn" onclick="startCapture()">Capture Key</button>
+          <span class="captured-box" id="capturedKey">&mdash;</span>
+        </div>
+        <div class="row" style="gap:8px">
+          <input type="text" id="mappingPath" placeholder="/event/1" style="flex:1" />
+          <button id="assignBtn" onclick="saveMapping()" disabled>Assign</button>
+        </div>
+      </div>
+      <div class="cfg-section" style="margin-bottom:0">
+        <label class="cfg-label">Current Mappings</label>
+        <div id="mappingsList"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Device Control</h2>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+        <button onclick="rebootDevice()">&#x21BA; Reboot</button>
+        <button class="warn" onclick="factoryReset()">&#x26A0; Factory Reset</button>
+      </div>
+      <div style="color:var(--muted);font-size:0.85rem">
+        <b>Reboot</b> restarts into run mode if config is complete.
+        <b>Factory Reset</b> clears all settings &amp; unpairs the keyboard.
+      </div>
     </div>
 
     <div class="card">
@@ -912,6 +1114,99 @@ const char PAGE[] PROGMEM = R"HTML(
       status('Disconnected');
     }
 
+    let capturing = false;
+    let capturedKeyHex = '';
+    let lastSeenKey = '';
+
+    async function loadConfig() {
+      const r = await fetch('/config');
+      const c = await r.json();
+      document.getElementById('wifiSsidInput').value = c.wifiSsid || '';
+      document.getElementById('wifiPwdInput').value = c.wifiPassword || '';
+      document.getElementById('baseUrlInput').value = c.baseUrl || '';
+      renderMappings(c.mappings || []);
+    }
+
+    async function saveWifi() {
+      const ssid = document.getElementById('wifiSsidInput').value.trim();
+      const pwd = document.getElementById('wifiPwdInput').value;
+      if (!ssid) { status('Enter WiFi SSID first'); return; }
+      await fetch('/config/setwifi?ssid=' + encodeURIComponent(ssid) + '&pwd=' + encodeURIComponent(pwd));
+      status('WiFi credentials saved');
+    }
+
+    function renderMappings(mappings) {
+      const el = document.getElementById('mappingsList');
+      if (!mappings.length) {
+        el.innerHTML = '<div style="color:var(--muted);font-size:0.9rem">No mappings defined yet.</div>';
+        return;
+      }
+      el.innerHTML = mappings.map(m =>
+        `<div class="mapping-row">
+          <span class="mono" style="min-width:52px">0x${m.key}</span>
+          <span style="flex:1">${m.path}</span>
+          <button class="warn" style="padding:5px 10px;font-size:0.8rem" onclick="deleteMapping('${m.key}')">Delete</button>
+        </div>`
+      ).join('');
+    }
+
+    async function saveBaseUrl() {
+      const url = document.getElementById('baseUrlInput').value.trim();
+      if (!url) { status('Enter a base URL first'); return; }
+      await fetch('/config/seturl?url=' + encodeURIComponent(url));
+      status('Base URL saved');
+    }
+
+    function startCapture() {
+      capturing = true;
+      capturedKeyHex = '';
+      document.getElementById('capturedKey').textContent = '...';
+      document.getElementById('assignBtn').disabled = true;
+      document.getElementById('captureBtn').textContent = 'Waiting...';
+      document.getElementById('captureBtn').disabled = true;
+    }
+
+    function checkCapture(lastKey) {
+      if (!capturing || !lastKey || lastKey === lastSeenKey) return;
+      capturing = false;
+      capturedKeyHex = lastKey;
+      document.getElementById('capturedKey').textContent = '0x' + lastKey;
+      document.getElementById('assignBtn').disabled = false;
+      document.getElementById('captureBtn').textContent = 'Capture Key';
+      document.getElementById('captureBtn').disabled = false;
+    }
+
+    async function saveMapping() {
+      if (!capturedKeyHex) return;
+      const path = document.getElementById('mappingPath').value.trim();
+      if (!path) { status('Enter a path first'); return; }
+      await fetch('/config/setmapping?key=' + encodeURIComponent(capturedKeyHex) + '&path=' + encodeURIComponent(path));
+      status('Mapped 0x' + capturedKeyHex + ' \u2192 ' + path);
+      capturedKeyHex = '';
+      document.getElementById('capturedKey').innerHTML = '&mdash;';
+      document.getElementById('mappingPath').value = '';
+      document.getElementById('assignBtn').disabled = true;
+      await loadConfig();
+    }
+
+    async function deleteMapping(key) {
+      await fetch('/config/delmapping?key=' + encodeURIComponent(key));
+      await loadConfig();
+    }
+
+    async function rebootDevice() {
+      if (!confirm('Reboot the device now?')) return;
+      status('Rebooting...');
+      await fetch('/reboot');
+    }
+
+    async function factoryReset() {
+      if (!confirm('Factory reset will erase ALL settings and unpair the keyboard. Are you sure?')) return;
+      status('Resetting...');
+      await fetch('/factory-reset');
+      status('Factory reset done. Device is rebooting.');
+    }
+
     async function refreshState() {
       const r = await fetch('/state');
       const s = await r.json();
@@ -922,14 +1217,163 @@ const char PAGE[] PROGMEM = R"HTML(
       elKeys.innerHTML = (s.keys || []).map(k => `<div>${k}</div>`).join('');
       elKeys.scrollTop = elKeys.scrollHeight;
       renderBondedPanel(s);
+      if (s.lastKey && s.lastKey !== lastSeenKey) {
+        checkCapture(s.lastKey);
+        lastSeenKey = s.lastKey;
+      }
     }
 
     setInterval(refreshState, 500);
     refreshState();
+    loadConfig();
   </script>
 </body>
 </html>
 )HTML";
+
+void loadConfig() {
+    gPrefs.begin("ble_cfg", true);
+  gWifiSsid = gPrefs.getString("wifissid", "");
+  gWifiPassword = gPrefs.getString("wifipass", "");
+    gBaseUrl = gPrefs.getString("baseurl", "");
+    uint8_t n = gPrefs.getUChar("n_maps", 0);
+    gKeyMappings.clear();
+    for (uint8_t i = 0; i < n && i < 32; i++) {
+        String kk = String("k") + String(i);
+        String pk = String("p") + String(i);
+        uint8_t code = gPrefs.getUChar(kk.c_str(), 0);
+        String path = gPrefs.getString(pk.c_str(), "");
+        if (code != 0 && path.length() > 0) {
+            gKeyMappings.push_back({code, path});
+        }
+    }
+    gPrefs.end();
+    addKeyLog(
+      String("Config: wifi=") + (gWifiSsid.length() ? gWifiSsid : "(none)") +
+      String(" url=") + (gBaseUrl.length() ? gBaseUrl : "(none)") +
+      String(" maps=") + String(gKeyMappings.size())
+    );
+}
+
+void saveConfig() {
+    gPrefs.begin("ble_cfg", false);
+    gPrefs.putString("wifissid", gWifiSsid);
+    gPrefs.putString("wifipass", gWifiPassword);
+    gPrefs.putString("baseurl", gBaseUrl);
+    gPrefs.putUChar("n_maps", (uint8_t)gKeyMappings.size());
+    for (size_t i = 0; i < gKeyMappings.size() && i < 32; i++) {
+        String kk = String("k") + String(i);
+        String pk = String("p") + String(i);
+        gPrefs.putUChar(kk.c_str(), gKeyMappings[i].keyCode);
+        gPrefs.putString(pk.c_str(), gKeyMappings[i].path);
+    }
+    gPrefs.end();
+}
+
+String configJson() {
+  String out = "{\"wifiSsid\":\"" + jsonEscape(gWifiSsid) + "\",";
+  out += "\"wifiPassword\":\"" + jsonEscape(gWifiPassword) + "\",";
+  out += "\"baseUrl\":\"" + jsonEscape(gBaseUrl) + "\",\"mappings\":[";
+    for (size_t i = 0; i < gKeyMappings.size(); i++) {
+        if (i > 0) out += ",";
+        out += "{\"key\":\"";
+        if (gKeyMappings[i].keyCode < 0x10) out += "0";
+        out += String(gKeyMappings[i].keyCode, HEX) + "\",\"path\":\"" + jsonEscape(gKeyMappings[i].path) + "\"}";
+    }
+    out += "]}";
+    return out;
+}
+
+void handleConfigGet() {
+    server.send(200, "application/json", configJson());
+}
+
+void handleSetUrl() {
+    if (!server.hasArg("url")) {
+        server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing url\"}");
+        return;
+    }
+    gBaseUrl = server.arg("url");
+    saveConfig();
+    addKeyLog(String("Base URL: ") + gBaseUrl);
+    server.send(200, "application/json", "{\"ok\":true}");
+}
+
+  void handleSetWifi() {
+    if (!server.hasArg("ssid")) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing ssid\"}");
+      return;
+    }
+    gWifiSsid = server.arg("ssid");
+    gWifiPassword = server.hasArg("pwd") ? server.arg("pwd") : "";
+    saveConfig();
+    addKeyLog(String("WiFi SSID: ") + gWifiSsid);
+    server.send(200, "application/json", "{\"ok\":true}");
+  }
+
+void handleSetMapping() {
+    if (!server.hasArg("key") || !server.hasArg("path")) {
+        server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing key or path\"}");
+        return;
+    }
+    uint8_t code = (uint8_t)strtol(server.arg("key").c_str(), nullptr, 16);
+    String path = server.arg("path");
+    for (auto& m : gKeyMappings) {
+        if (m.keyCode == code) {
+            m.path = path;
+            saveConfig();
+            server.send(200, "application/json", "{\"ok\":true}");
+            return;
+        }
+    }
+    gKeyMappings.push_back({code, path});
+    saveConfig();
+    addKeyLog(String("Map 0x") + String(code, HEX) + String(" -> ") + path);
+    server.send(200, "application/json", "{\"ok\":true}");
+}
+
+void handleDelMapping() {
+    if (!server.hasArg("key")) {
+        server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing key\"}");
+        return;
+    }
+    uint8_t code = (uint8_t)strtol(server.arg("key").c_str(), nullptr, 16);
+    size_t before = gKeyMappings.size();
+    gKeyMappings.erase(
+        std::remove_if(gKeyMappings.begin(), gKeyMappings.end(),
+            [code](const KeyMapping& m){ return m.keyCode == code; }),
+        gKeyMappings.end()
+    );
+    if (gKeyMappings.size() == before) {
+        server.send(200, "application/json", "{\"ok\":false,\"error\":\"key not found\"}");
+        return;
+    }
+    saveConfig();
+    addKeyLog(String("Del map 0x") + String(code, HEX));
+    server.send(200, "application/json", "{\"ok\":true}");
+}
+
+void handleReboot() {
+    server.send(200, "application/json", "{\"ok\":true}");
+    delay(300);
+    ESP.restart();
+}
+
+void handleFactoryReset() {
+    NimBLEDevice::deleteAllBonds();
+    gPrefs.begin("ble_cfg", false);
+    gPrefs.clear();
+    gPrefs.end();
+    gBaseUrl = "";
+    gWifiSsid = "";
+    gWifiPassword = "";
+    gKeyMappings.clear();
+    gPreferredBondedAddress = "";
+    gPreferredBondedName = "";
+    server.send(200, "application/json", "{\"ok\":true}");
+    delay(300);
+    ESP.restart();
+}
 
 void handleScan() {
     performScan();
@@ -971,10 +1415,12 @@ void handleConnect() {
 
 void setup() {
     Serial.begin(115200);
-    delay(800);
 
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(AP_SSID, AP_PASSWORD);
+    // Check boot button FIRST, before any slow init, so the user doesn't
+    // have to hold it for longer than CONFIG_BUTTON_HOLD_MS.
+    bool forceConfigMode = isConfigButtonHeldOnBoot();
+
+    delay(800);
 
     NimBLEDevice::init("ESP32-KB-Receiver");
     NimBLEDevice::setPower(ESP_PWR_LVL_P9, ESP_BLE_PWR_TYPE_DEFAULT);
@@ -984,31 +1430,58 @@ void setup() {
     NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
     NimBLEDevice::setSecurityCallbacks(new SecurityCallbacks());
 
+    loadConfig();
     refreshPreferredBondedDevice();
 
-    server.on("/", HTTP_GET, []() { server.send(200, "text/html", PAGE); });
-    server.on("/scan", HTTP_GET, handleScan);
-    server.on("/pair", HTTP_GET, handlePair);
-    server.on("/connect", HTTP_GET, handleConnect);
-    server.on("/unpair", HTTP_GET, handleUnpair);
-    server.on("/disconnect", HTTP_GET, []() {
-        disconnectKeyboard();
-        server.send(200, "application/json", "{\"ok\":true}");
-    });
-    server.on("/state", HTTP_GET, handleState);
-    server.begin();
+    bool runConfigReady = hasValidRunConfig();
+    gConfigMode = forceConfigMode || !runConfigReady;
 
-    Serial.println("\nESP32 BLE Keyboard Hub");
-    Serial.print("Open GUI at: http://");
-    Serial.println(WiFi.softAPIP());
-    addKeyLog("GUI ready");
+    if (gConfigMode) {
+      WiFi.mode(WIFI_AP);
+      WiFi.softAP(AP_SSID, AP_PASSWORD);
+
+      server.on("/", HTTP_GET, []() { server.send(200, "text/html", PAGE); });
+      server.on("/scan", HTTP_GET, handleScan);
+      server.on("/pair", HTTP_GET, handlePair);
+      server.on("/connect", HTTP_GET, handleConnect);
+      server.on("/unpair", HTTP_GET, handleUnpair);
+      server.on("/disconnect", HTTP_GET, []() {
+          disconnectKeyboard();
+          server.send(200, "application/json", "{\"ok\":true}");
+      });
+      server.on("/state", HTTP_GET, handleState);
+      server.on("/config", HTTP_GET, handleConfigGet);
+      server.on("/config/seturl", HTTP_GET, handleSetUrl);
+      server.on("/config/setwifi", HTTP_GET, handleSetWifi);
+      server.on("/config/setmapping", HTTP_GET, handleSetMapping);
+      server.on("/config/delmapping", HTTP_GET, handleDelMapping);
+      server.on("/reboot", HTTP_GET, handleReboot);
+      server.on("/factory-reset", HTTP_GET, handleFactoryReset);
+      server.begin();
+
+      Serial.println("\nESP32 BLE Keyboard Hub - CONFIG mode");
+      Serial.print("Open GUI at: http://");
+      Serial.println(WiFi.softAPIP());
+      addKeyLog("GUI ready");
+    } else {
+      WiFi.mode(WIFI_STA);
+      WiFi.begin(gWifiSsid.c_str(), gWifiPassword.c_str());
+      Serial.println("\nESP32 BLE Keyboard Hub - RUN mode");
+      addKeyLog(String("RUN mode WiFi SSID: ") + gWifiSsid);
+      addKeyLog("RUN mode: waiting for keyboard and mapped keypresses");
+    }
 }
 
 void loop() {
-    server.handleClient();
+    if (gConfigMode) {
+      server.handleClient();
+    }
     if (gClient && gConnected && !gClient->isConnected()) {
         gConnected = false;
     }
-  maybeAutoConnectBondedKeyboard();
+    maybeAutoConnectBondedKeyboard();
+    if (!gConfigMode) {
+      processPendingKeys();
+    }
     delay(10);
 }
