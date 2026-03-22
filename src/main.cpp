@@ -3,11 +3,13 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <HTTPClient.h>
-#include <Preferences.h>
 #include <algorithm>
 
 #include <deque>
 #include <vector>
+
+#include "ble_keyboard.h"
+#include "config_store.h"
 
 #define HID_SERVICE_UUID      "1812"
 #define HID_INPUT_REPORT_UUID "2A4D"
@@ -24,33 +26,16 @@ struct DiscoveredDevice {
     bool pairableNow;
 };
 
-struct KeyMapping {
-    uint8_t keyCode;
-    String path;
-};
-
 WebServer server(80);
-
-static NimBLEClient* gClient = nullptr;
-static bool gConnected = false;
-static String gConnectedName = "";
-static String gConnectedAddress = "";
 
 static std::vector<DiscoveredDevice> gDevices;
 static std::deque<String> gKeyLog;
 static const size_t MAX_KEY_LOG = 40;
-static size_t gSubscribedCharacteristicCount = 0;
-static String gPreferredBondedAddress = "";
-static String gPreferredBondedName = "";
-static unsigned long gLastAutoConnectAttemptMs = 0;
-static const unsigned long AUTO_CONNECT_INTERVAL_MS = 8000;
 
-static Preferences gPrefs;
 static String gBaseUrl = "";
 static String gWifiSsid = "";
 static String gWifiPassword = "";
 static std::vector<KeyMapping> gKeyMappings;
-static uint8_t gLastKeyCode = 0;
 static std::deque<uint8_t> gPendingKeyCodes;
 static bool gConfigMode = true;
 static uint8_t gLastDispatchedKeyCode = 0;
@@ -61,21 +46,6 @@ static const unsigned long CONFIG_BUTTON_HOLD_MS = 800;
 static const unsigned long KEY_REPEAT_FILTER_MS = 120;
 
 void addKeyLog(const String& line);
-bool isBondedAddress(const String& address);
-void logConnectionSecurity(const String& prefix);
-void disconnectKeyboard();
-bool openKeyboardLink(const String& address, const String& nameHint);
-bool pairKeyboard(const String& address, const String& nameHint);
-bool unpairKeyboard(const String& address);
-bool removeBondByAddress(const String& address);
-void refreshPreferredBondedDevice();
-void maybeAutoConnectBondedKeyboard();
-bool isAdvertisedAsPairingMode(NimBLEAdvertisedDevice& d);
-bool canPairDeviceNow(const String& address, String& reason);
-void loadConfig();
-void saveConfig();
-String configJson();
-bool hasValidRunConfig();
 bool isConfigButtonHeldOnBoot();
 String mappedPathForKey(uint8_t keyCode);
 void queueKeyPress(uint8_t keyCode);
@@ -88,42 +58,6 @@ void handleSetMapping();
 void handleDelMapping();
 void handleReboot();
 void handleFactoryReset();
-
-class SecurityCallbacks : public NimBLESecurityCallbacks {
-  uint32_t onPassKeyRequest() override {
-    addKeyLog("Passkey requested; returning 000000");
-    return 0;
-  }
-
-  void onPassKeyNotify(uint32_t pass_key) override {
-    addKeyLog(String("Passkey notify: ") + String(pass_key));
-  }
-
-  bool onConfirmPIN(uint32_t pass_key) override {
-    addKeyLog(String("Confirm PIN: ") + String(pass_key));
-    return true;
-  }
-
-  bool onSecurityRequest() override {
-    addKeyLog("Security request accepted");
-    return true;
-  }
-
-  void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
-    if (!desc) {
-      addKeyLog("Authentication complete: no descriptor");
-      return;
-    }
-    if (desc->sec_state.encrypted) {
-      String line = "Auth complete: encrypted=yes";
-      line += desc->sec_state.authenticated ? " authenticated=yes" : " authenticated=no";
-      line += desc->sec_state.bonded ? " bonded=yes" : " bonded=no";
-      addKeyLog(line);
-    } else {
-      addKeyLog("Pairing failed (not encrypted)");
-    }
-  }
-};
 
 String jsonEscape(const String& in) {
     String out = "";
@@ -153,135 +87,6 @@ void addKeyLog(const String& line) {
         gKeyLog.pop_front();
     }
     Serial.println(line);
-}
-
-  bool isBondedAddress(const String& address) {
-    if (NimBLEDevice::isBonded(NimBLEAddress(address.c_str(), BLE_ADDR_PUBLIC))) {
-      return true;
-    }
-    if (NimBLEDevice::isBonded(NimBLEAddress(address.c_str(), BLE_ADDR_RANDOM))) {
-      return true;
-    }
-
-    const int bondCount = NimBLEDevice::getNumBonds();
-    for (int i = 0; i < bondCount; i++) {
-      String bondedAddr = String(NimBLEDevice::getBondedAddress(i).toString().c_str());
-      if (bondedAddr.equalsIgnoreCase(address)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  bool removeBondByAddress(const String& address) {
-    bool removed = false;
-
-    if (NimBLEDevice::deleteBond(NimBLEAddress(address.c_str(), BLE_ADDR_PUBLIC))) {
-      removed = true;
-    }
-    if (NimBLEDevice::deleteBond(NimBLEAddress(address.c_str(), BLE_ADDR_RANDOM))) {
-      removed = true;
-    }
-
-    for (int i = NimBLEDevice::getNumBonds() - 1; i >= 0; i--) {
-      NimBLEAddress bonded = NimBLEDevice::getBondedAddress(i);
-      String bondedAddr = String(bonded.toString().c_str());
-      if (!bondedAddr.equalsIgnoreCase(address)) {
-        continue;
-      }
-
-      if (NimBLEDevice::deleteBond(bonded)) {
-        removed = true;
-      }
-    }
-
-    return removed;
-  }
-
-  void refreshPreferredBondedDevice() {
-    if (gPreferredBondedAddress.length() > 0 && isBondedAddress(gPreferredBondedAddress)) {
-      return;
-    }
-
-    gPreferredBondedAddress = "";
-    gPreferredBondedName = "";
-    const int bondCount = NimBLEDevice::getNumBonds();
-    if (bondCount <= 0) {
-      return;
-    }
-
-    NimBLEAddress addr = NimBLEDevice::getBondedAddress(0);
-    gPreferredBondedAddress = String(addr.toString().c_str());
-  }
-
-  void logConnectionSecurity(const String& prefix) {
-    if (!gClient || !gClient->isConnected()) {
-      addKeyLog(prefix + ": no active connection");
-      return;
-    }
-
-    NimBLEConnInfo info = gClient->getConnInfo();
-    String line = prefix;
-    line += " encrypted=";
-    line += info.isEncrypted() ? "yes" : "no";
-    line += " authenticated=";
-    line += info.isAuthenticated() ? "yes" : "no";
-    line += " bonded=";
-    line += info.isBonded() ? "yes" : "no";
-    addKeyLog(line);
-  }
-
-  bool isAdvertisedAsPairingMode(NimBLEAdvertisedDevice& d) {
-    // nRF Connect confirmed: keyboard sets LE Limited Discoverable Mode flag (0x01)
-    // only when in explicit pairing mode, and clears it otherwise.
-    return (d.getAdvFlags() & 0x01) != 0;
-  }
-
-  bool canPairDeviceNow(const String& address, String& reason) {
-    NimBLEScan* scan = NimBLEDevice::getScan();
-    scan->setInterval(80);
-    scan->setWindow(40);
-    scan->setActiveScan(true);
-    scan->clearResults();
-
-    NimBLEScanResults results = scan->start(4, false);
-    for (int i = 0; i < results.getCount(); i++) {
-      NimBLEAdvertisedDevice d = results.getDevice(i);
-      String found = String(d.getAddress().toString().c_str());
-      if (!found.equalsIgnoreCase(address)) {
-        continue;
-      }
-
-      uint8_t flags = d.getAdvFlags();
-      uint8_t advType = d.getAdvType();
-      bool directed = d.haveTargetAddress() || advType == 1 || advType == 4;
-      if (isAdvertisedAsPairingMode(d)) {
-        reason = "ok";
-        return true;
-      }
-
-      reason = String("device not advertising for new pairing (advType=") + String(advType) + String(", flags=0x") + String(flags, HEX) + String(", directed=") + String(directed ? 1 : 0) + String(")");
-      return false;
-    }
-
-    reason = "device not currently advertising";
-    return false;
-  }
-
-bool hasValidRunConfig() {
-  if (gWifiSsid.length() == 0) {
-    return false;
-  }
-  if (gBaseUrl.length() == 0) {
-    return false;
-  }
-  if (gKeyMappings.empty()) {
-    return false;
-  }
-  if (gPreferredBondedAddress.length() == 0) {
-    return false;
-  }
-  return true;
 }
 
 bool isConfigButtonHeldOnBoot() {
@@ -370,322 +175,6 @@ void processPendingKeys() {
   }
 }
 
-static void notifyCallback(NimBLERemoteCharacteristic* pRemoteCharacteristic,
-                           uint8_t* pData,
-                           size_t length,
-                           bool isNotify) {
-    (void)pRemoteCharacteristic;
-    if (!isNotify || length < 3) return;
-    // HID report: byte 0 = modifiers, byte 1 = reserved, bytes 2-7 = keycodes
-    for (int i = 2; i < (int)length && i < 8; i++) {
-        if (pData[i] != 0) {
-            gLastKeyCode = pData[i];
-          queueKeyPress(pData[i]);
-            Serial.write(pData[i]);
-            String line = "KEY 0x";
-            if (pData[i] < 0x10) line += "0";
-            line += String(pData[i], HEX);
-            addKeyLog(line);
-            break;
-        }
-    }
-}
-
-class ClientCallbacks : public NimBLEClientCallbacks {
-    void onConnect(NimBLEClient* pClient) override {
-        (void)pClient;
-        gConnected = true;
-        addKeyLog("Connected");
-    }
-
-    void onDisconnect(NimBLEClient* pClient) override {
-        (void)pClient;
-        gConnected = false;
-        addKeyLog("Disconnected");
-    }
-
-    bool onConnParamsUpdateRequest(NimBLEClient* pClient, const ble_gap_upd_params* params) override {
-        (void)pClient;
-        (void)params;
-        return true;
-    }
-
-    void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
-      if (!desc) {
-        addKeyLog("Auth callback missing descriptor");
-        return;
-      }
-      if (!desc->sec_state.encrypted) {
-        addKeyLog("Auth failed, disconnecting");
-        NimBLEClient* c = NimBLEDevice::getClientByID(desc->conn_handle);
-        if (c) {
-          c->disconnect();
-        }
-        return;
-      }
-      addKeyLog("Auth success");
-    }
-};
-
-bool subscribeToKeyboard() {
-    if (!gClient || !gClient->isConnected()) {
-        return false;
-    }
-
-    gSubscribedCharacteristicCount = 0;
-
-    addKeyLog("Discovering services...");
-    delay(500);
-    
-    if (!gClient->discoverAttributes()) {
-        addKeyLog("Failed to discover attributes");
-        return false;
-    }
-    
-    delay(500);
-
-    std::vector<NimBLERemoteService*>* services = gClient->getServices();
-    if (!services) {
-        addKeyLog("No services found after discovery");
-        return false;
-    }
-
-    NimBLERemoteService* hidService = gClient->getService(HID_SERVICE_UUID);
-    if (!hidService) {
-        addKeyLog("HID service not found after discovery");
-        return false;
-    }
-
-    std::vector<NimBLERemoteCharacteristic*>* hidChars = hidService->getCharacteristics();
-    if (!hidChars) {
-        addKeyLog("HID service has no characteristics");
-        return false;
-    }
-
-    addKeyLog("Subscribing to HID input characteristics...");
-    for (auto ch : *hidChars) {
-        String charUUID = String(ch->getUUID().toString().c_str());
-        bool isKeyboardInput =
-            charUUID.equalsIgnoreCase("0x2a22") ||
-            charUUID.equalsIgnoreCase("2a22") ||
-            charUUID.equalsIgnoreCase("0x2a4d") ||
-            charUUID.equalsIgnoreCase("2a4d");
-        bool canSignal = ch->canNotify() || ch->canIndicate();
-
-        if (!isKeyboardInput || !canSignal) {
-            continue;
-        }
-
-        bool preferNotify = ch->canNotify();
-        if (ch->subscribe(preferNotify, notifyCallback)) {
-            gSubscribedCharacteristicCount++;
-            addKeyLog(String("Subscribed: ") + charUUID);
-        } else {
-            addKeyLog(String("Subscribe failed: ") + charUUID);
-        }
-    }
-
-    if (gSubscribedCharacteristicCount == 0) {
-        addKeyLog("Could not subscribe to any HID input characteristic");
-        return false;
-    }
-
-    addKeyLog(String("Subscribed HID characteristics: ") + String(gSubscribedCharacteristicCount));
-    return true;
-}
-
-  bool openKeyboardLink(const String& address, const String& nameHint) {
-    disconnectKeyboard();
-
-    gClient = NimBLEDevice::createClient();
-    gClient->setClientCallbacks(new ClientCallbacks(), true);
-    gClient->setConnectTimeout(10);
-
-    NimBLEScan* scan = NimBLEDevice::getScan();
-    scan->setInterval(80);
-    scan->setWindow(40);
-    scan->setActiveScan(true);
-    scan->clearResults();
-
-    addKeyLog(String("Connecting to ") + address);
-    NimBLEAdvertisedDevice* target = nullptr;
-    NimBLEScanResults results = scan->start(4, false);
-    for (int i = 0; i < results.getCount(); i++) {
-      NimBLEAdvertisedDevice d = results.getDevice(i);
-      String found = String(d.getAddress().toString().c_str());
-      if (found.equalsIgnoreCase(address)) {
-        target = new NimBLEAdvertisedDevice(d);
-        break;
-      }
-    }
-
-    bool ok = false;
-    if (target) {
-      ok = gClient->connect(target, false);
-      delete target;
-    } else {
-      addKeyLog("Device not found in fresh scan, trying direct address");
-      ok = gClient->connect(NimBLEAddress(address.c_str()), false);
-    }
-
-    if (!ok) {
-      addKeyLog("Connect failed");
-      NimBLEDevice::deleteClient(gClient);
-      gClient = nullptr;
-      return false;
-    }
-
-    gConnectedName = nameHint;
-    gConnectedAddress = address;
-    logConnectionSecurity("Link security");
-    return true;
-  }
-
-  bool pairKeyboard(const String& address, const String& nameHint) {
-    if (isBondedAddress(address)) {
-        gPreferredBondedAddress = address;
-        gPreferredBondedName = nameHint;
-      addKeyLog("Device already bonded");
-      return true;
-    }
-
-      String pairReason;
-      if (!canPairDeviceNow(address, pairReason)) {
-        addKeyLog(String("Pair rejected: ") + pairReason);
-        return false;
-      }
-      if (pairReason != "ok") {
-        addKeyLog(pairReason);
-      }
-
-    if (!openKeyboardLink(address, nameHint)) {
-      return false;
-    }
-
-    addKeyLog("Starting pairing");
-    if (!gClient->secureConnection()) {
-      addKeyLog("Pairing request failed");
-      disconnectKeyboard();
-      return false;
-    }
-
-    logConnectionSecurity("Post-pair security");
-    bool bonded = isBondedAddress(address) || gClient->getConnInfo().isBonded();
-    if (!bonded) {
-      addKeyLog("Pairing finished without a stored bond");
-      disconnectKeyboard();
-      return false;
-    }
-
-    gPreferredBondedAddress = address;
-    gPreferredBondedName = nameHint;
-    addKeyLog("Bond stored; disconnecting until normal connect");
-    disconnectKeyboard();
-    return true;
-  }
-
-  bool unpairKeyboard(const String& address) {
-    if (gConnectedAddress.equalsIgnoreCase(address)) {
-      disconnectKeyboard();
-    }
-
-    bool removed = removeBondByAddress(address);
-    bool stillBonded = isBondedAddress(address);
-    if (!removed || stillBonded) {
-      addKeyLog(String("Unpair failed: ") + address);
-      return false;
-    }
-
-    addKeyLog(String("Unpaired: ") + address);
-    if (gPreferredBondedAddress.equalsIgnoreCase(address)) {
-      gPreferredBondedAddress = "";
-      gPreferredBondedName = "";
-    }
-    refreshPreferredBondedDevice();
-    return true;
-  }
-
-void disconnectKeyboard() {
-    if (gClient) {
-        if (gClient->isConnected()) {
-            gClient->disconnect();
-        }
-        NimBLEDevice::deleteClient(gClient);
-        gClient = nullptr;
-    }
-    gConnected = false;
-    gConnectedName = "";
-    gConnectedAddress = "";
-}
-
-bool connectToKeyboard(const String& address, const String& nameHint) {
-    if (!isBondedAddress(address)) {
-        addKeyLog("Connect rejected: device is not bonded. Pair it first.");
-        return false;
-    }
-
-    if (!openKeyboardLink(address, nameHint)) {
-        return false;
-    }
-
-    if (!gClient->getConnInfo().isEncrypted()) {
-        addKeyLog("Restoring secure bonded connection");
-        if (!gClient->secureConnection()) {
-            addKeyLog("Secure reconnect failed");
-            disconnectKeyboard();
-            return false;
-        }
-    }
-
-    gPreferredBondedAddress = address;
-    gPreferredBondedName = nameHint;
-    logConnectionSecurity("Ready to use");
-    if (!subscribeToKeyboard()) {
-        addKeyLog("Connected, but keyboard input subscribe failed");
-        return false;
-    }
-    return true;
-}
-
-  void maybeAutoConnectBondedKeyboard() {
-    if (gConnected) {
-      return;
-    }
-
-    if (millis() - gLastAutoConnectAttemptMs < AUTO_CONNECT_INTERVAL_MS) {
-      return;
-    }
-
-    refreshPreferredBondedDevice();
-    if (gPreferredBondedAddress.length() == 0) {
-      return;
-    }
-
-    gLastAutoConnectAttemptMs = millis();
-
-    NimBLEScan* scan = NimBLEDevice::getScan();
-    scan->setInterval(80);
-    scan->setWindow(40);
-    scan->setActiveScan(true);
-    scan->clearResults();
-
-    NimBLEScanResults results = scan->start(2, false);
-    for (int i = 0; i < results.getCount(); i++) {
-      NimBLEAdvertisedDevice d = results.getDevice(i);
-      String found = String(d.getAddress().toString().c_str());
-      if (!found.equalsIgnoreCase(gPreferredBondedAddress)) {
-        continue;
-      }
-
-      String name = d.haveName() ? String(d.getName().c_str()) : gPreferredBondedName;
-      addKeyLog(String("Auto-connecting to bonded keyboard: ") + found);
-      if (!connectToKeyboard(found, name)) {
-        addKeyLog("Auto-connect failed");
-      }
-      return;
-    }
-  }
-
 void performScan() {
     gDevices.clear();
 
@@ -703,8 +192,8 @@ void performScan() {
         }
 
       String address = String(d.getAddress().toString().c_str());
-      bool bonded = isBondedAddress(address);
-      bool pairableNow = !bonded && isAdvertisedAsPairingMode(d);
+      bool bonded = BLEKeyboard::isBondedAddress(address);
+      bool pairableNow = !bonded && BLEKeyboard::isAdvertisedAsPairingMode(d);
 
       if (!bonded && !pairableNow) {
         continue;
@@ -742,8 +231,8 @@ void performScan() {
         item.bonded = true;
         item.seen = false;
         item.pairableNow = false;
-        if (bondedAddr.equalsIgnoreCase(gPreferredBondedAddress) && gPreferredBondedName.length() > 0) {
-          item.name = gPreferredBondedName;
+        if (bondedAddr.equalsIgnoreCase(BLEKeyboard::preferredBondedAddress()) && BLEKeyboard::preferredBondedName().length() > 0) {
+          item.name = BLEKeyboard::preferredBondedName();
         } else {
           item.name = "(bonded device)";
         }
@@ -788,15 +277,15 @@ String keyLogJson() {
 void handleState() {
     String out = "{";
     out += "\"connected\":";
-    out += gConnected ? "true" : "false";
-    out += ",\"name\":\"" + jsonEscape(gConnectedName) + "\"";
-    out += ",\"address\":\"" + jsonEscape(gConnectedAddress) + "\"";
-    out += ",\"bondedAddress\":\"" + jsonEscape(gPreferredBondedAddress) + "\"";
-    out += ",\"bondedName\":\"" + jsonEscape(gPreferredBondedName) + "\"";
+  out += BLEKeyboard::isConnected() ? "true" : "false";
+  out += ",\"name\":\"" + jsonEscape(BLEKeyboard::connectedName()) + "\"";
+  out += ",\"address\":\"" + jsonEscape(BLEKeyboard::connectedAddress()) + "\"";
+  out += ",\"bondedAddress\":\"" + jsonEscape(BLEKeyboard::preferredBondedAddress()) + "\"";
+  out += ",\"bondedName\":\"" + jsonEscape(BLEKeyboard::preferredBondedName()) + "\"";
     out += ",\"lastKey\":\"";
-    if (gLastKeyCode > 0) {
-        if (gLastKeyCode < 0x10) out += "0";
-        out += String(gLastKeyCode, HEX);
+  if (BLEKeyboard::lastKeyCode() > 0) {
+    if (BLEKeyboard::lastKeyCode() < 0x10) out += "0";
+    out += String(BLEKeyboard::lastKeyCode(), HEX);
     }
     out += "\"";
     out += ",\"keys\":" + keyLogJson();
@@ -1231,61 +720,8 @@ const char PAGE[] PROGMEM = R"HTML(
 </html>
 )HTML";
 
-void loadConfig() {
-    gPrefs.begin("ble_cfg", true);
-  gWifiSsid = gPrefs.getString("wifissid", "");
-  gWifiPassword = gPrefs.getString("wifipass", "");
-    gBaseUrl = gPrefs.getString("baseurl", "");
-    uint8_t n = gPrefs.getUChar("n_maps", 0);
-    gKeyMappings.clear();
-    for (uint8_t i = 0; i < n && i < 32; i++) {
-        String kk = String("k") + String(i);
-        String pk = String("p") + String(i);
-        uint8_t code = gPrefs.getUChar(kk.c_str(), 0);
-        String path = gPrefs.getString(pk.c_str(), "");
-        if (code != 0 && path.length() > 0) {
-            gKeyMappings.push_back({code, path});
-        }
-    }
-    gPrefs.end();
-    addKeyLog(
-      String("Config: wifi=") + (gWifiSsid.length() ? gWifiSsid : "(none)") +
-      String(" url=") + (gBaseUrl.length() ? gBaseUrl : "(none)") +
-      String(" maps=") + String(gKeyMappings.size())
-    );
-}
-
-void saveConfig() {
-    gPrefs.begin("ble_cfg", false);
-    gPrefs.putString("wifissid", gWifiSsid);
-    gPrefs.putString("wifipass", gWifiPassword);
-    gPrefs.putString("baseurl", gBaseUrl);
-    gPrefs.putUChar("n_maps", (uint8_t)gKeyMappings.size());
-    for (size_t i = 0; i < gKeyMappings.size() && i < 32; i++) {
-        String kk = String("k") + String(i);
-        String pk = String("p") + String(i);
-        gPrefs.putUChar(kk.c_str(), gKeyMappings[i].keyCode);
-        gPrefs.putString(pk.c_str(), gKeyMappings[i].path);
-    }
-    gPrefs.end();
-}
-
-String configJson() {
-  String out = "{\"wifiSsid\":\"" + jsonEscape(gWifiSsid) + "\",";
-  out += "\"wifiPassword\":\"" + jsonEscape(gWifiPassword) + "\",";
-  out += "\"baseUrl\":\"" + jsonEscape(gBaseUrl) + "\",\"mappings\":[";
-    for (size_t i = 0; i < gKeyMappings.size(); i++) {
-        if (i > 0) out += ",";
-        out += "{\"key\":\"";
-        if (gKeyMappings[i].keyCode < 0x10) out += "0";
-        out += String(gKeyMappings[i].keyCode, HEX) + "\",\"path\":\"" + jsonEscape(gKeyMappings[i].path) + "\"}";
-    }
-    out += "]}";
-    return out;
-}
-
 void handleConfigGet() {
-    server.send(200, "application/json", configJson());
+  server.send(200, "application/json", ConfigStore::configJson(gWifiSsid, gWifiPassword, gBaseUrl, gKeyMappings, jsonEscape));
 }
 
 void handleSetUrl() {
@@ -1294,7 +730,7 @@ void handleSetUrl() {
         return;
     }
     gBaseUrl = server.arg("url");
-    saveConfig();
+    ConfigStore::save(gWifiSsid, gWifiPassword, gBaseUrl, gKeyMappings);
     addKeyLog(String("Base URL: ") + gBaseUrl);
     server.send(200, "application/json", "{\"ok\":true}");
 }
@@ -1306,7 +742,7 @@ void handleSetUrl() {
     }
     gWifiSsid = server.arg("ssid");
     gWifiPassword = server.hasArg("pwd") ? server.arg("pwd") : "";
-    saveConfig();
+    ConfigStore::save(gWifiSsid, gWifiPassword, gBaseUrl, gKeyMappings);
     addKeyLog(String("WiFi SSID: ") + gWifiSsid);
     server.send(200, "application/json", "{\"ok\":true}");
   }
@@ -1321,13 +757,13 @@ void handleSetMapping() {
     for (auto& m : gKeyMappings) {
         if (m.keyCode == code) {
             m.path = path;
-            saveConfig();
+        ConfigStore::save(gWifiSsid, gWifiPassword, gBaseUrl, gKeyMappings);
             server.send(200, "application/json", "{\"ok\":true}");
             return;
         }
     }
     gKeyMappings.push_back({code, path});
-    saveConfig();
+    ConfigStore::save(gWifiSsid, gWifiPassword, gBaseUrl, gKeyMappings);
     addKeyLog(String("Map 0x") + String(code, HEX) + String(" -> ") + path);
     server.send(200, "application/json", "{\"ok\":true}");
 }
@@ -1348,7 +784,7 @@ void handleDelMapping() {
         server.send(200, "application/json", "{\"ok\":false,\"error\":\"key not found\"}");
         return;
     }
-    saveConfig();
+    ConfigStore::save(gWifiSsid, gWifiPassword, gBaseUrl, gKeyMappings);
     addKeyLog(String("Del map 0x") + String(code, HEX));
     server.send(200, "application/json", "{\"ok\":true}");
 }
@@ -1361,15 +797,12 @@ void handleReboot() {
 
 void handleFactoryReset() {
     NimBLEDevice::deleteAllBonds();
-    gPrefs.begin("ble_cfg", false);
-    gPrefs.clear();
-    gPrefs.end();
+  ConfigStore::clearAll();
     gBaseUrl = "";
     gWifiSsid = "";
     gWifiPassword = "";
     gKeyMappings.clear();
-    gPreferredBondedAddress = "";
-    gPreferredBondedName = "";
+    BLEKeyboard::clearPreferredBondedDevice();
     server.send(200, "application/json", "{\"ok\":true}");
     delay(300);
     ESP.restart();
@@ -1388,7 +821,7 @@ void handleConnect() {
     }
     const String addr = server.arg("addr");
     const String name = server.hasArg("name") ? server.arg("name") : "";
-    const bool ok = connectToKeyboard(addr, name);
+    const bool ok = BLEKeyboard::connectToKeyboard(addr, name);
     server.send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"connect failed or device not bonded\"}");
   }
 
@@ -1399,7 +832,7 @@ void handleConnect() {
     }
     const String addr = server.arg("addr");
     const String name = server.hasArg("name") ? server.arg("name") : "";
-    const bool ok = pairKeyboard(addr, name);
+    const bool ok = BLEKeyboard::pairKeyboard(addr, name);
     server.send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"pair failed (device may not accept new bonding now)\"}");
 }
 
@@ -1409,7 +842,7 @@ void handleConnect() {
       return;
     }
     const String addr = server.arg("addr");
-    const bool ok = unpairKeyboard(addr);
+    const bool ok = BLEKeyboard::unpairKeyboard(addr);
     server.send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"unpair failed\"}");
   }
 
@@ -1428,12 +861,17 @@ void setup() {
     NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
     NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
     NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
-    NimBLEDevice::setSecurityCallbacks(new SecurityCallbacks());
+    BLEKeyboard::begin(addKeyLog, queueKeyPress);
 
-    loadConfig();
-    refreshPreferredBondedDevice();
+    ConfigStore::load(gWifiSsid, gWifiPassword, gBaseUrl, gKeyMappings);
+    addKeyLog(
+      String("Config: wifi=") + (gWifiSsid.length() ? gWifiSsid : "(none)") +
+      String(" url=") + (gBaseUrl.length() ? gBaseUrl : "(none)") +
+      String(" maps=") + String(gKeyMappings.size())
+    );
+    BLEKeyboard::refreshPreferredBondedDevice();
 
-    bool runConfigReady = hasValidRunConfig();
+    bool runConfigReady = ConfigStore::hasValidRunConfig(gWifiSsid, gBaseUrl, gKeyMappings, BLEKeyboard::preferredBondedAddress());
     gConfigMode = forceConfigMode || !runConfigReady;
 
     if (gConfigMode) {
@@ -1446,7 +884,7 @@ void setup() {
       server.on("/connect", HTTP_GET, handleConnect);
       server.on("/unpair", HTTP_GET, handleUnpair);
       server.on("/disconnect", HTTP_GET, []() {
-          disconnectKeyboard();
+          BLEKeyboard::disconnectKeyboard();
           server.send(200, "application/json", "{\"ok\":true}");
       });
       server.on("/state", HTTP_GET, handleState);
@@ -1476,10 +914,8 @@ void loop() {
     if (gConfigMode) {
       server.handleClient();
     }
-    if (gClient && gConnected && !gClient->isConnected()) {
-        gConnected = false;
-    }
-    maybeAutoConnectBondedKeyboard();
+    BLEKeyboard::syncConnectionState();
+    BLEKeyboard::maybeAutoConnectBondedKeyboard();
     if (!gConfigMode) {
       processPendingKeys();
     }
