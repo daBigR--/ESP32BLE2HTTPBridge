@@ -13,7 +13,6 @@ struct Context {
   std::vector<WifiCredential>* wifiNetworks;
   String* baseUrl;
   std::vector<KeyMapping>* keyMappings;
-  String (*jsonEscape)(const String&);
   void (*logFn)(const String&);
   void (*factoryResetExtrasFn)();
 };

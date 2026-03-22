@@ -5,12 +5,13 @@
 #include <WebServer.h>
 #include <algorithm>
 
-#include <deque>
 #include <vector>
 
 #include "ble_keyboard.h"
 #include "config_store.h"
 #include "http_bridge.h"
+#include "json_util.h"
+#include "key_log.h"
 #include "web_config_api.h"
 #include "web_page.h"
 
@@ -32,8 +33,6 @@ struct DiscoveredDevice {
 WebServer server(80);
 
 static std::vector<DiscoveredDevice> gDevices;
-static std::deque<String> gKeyLog;
-static const size_t MAX_KEY_LOG = 40;
 
 static String gBaseUrl = "";
 static std::vector<WifiCredential> gWifiNetworks;
@@ -44,40 +43,9 @@ static bool gConfigMode = true;
 static const uint8_t CONFIG_BUTTON_PIN = D9;
 static const unsigned long CONFIG_BUTTON_HOLD_MS = 800;
 
-void addKeyLog(const String& line);
 bool isConfigButtonHeldOnBoot();
 String mappedPathForKey(uint8_t keyCode);
 void handleFactoryResetExtras();
-
-String jsonEscape(const String& in) {
-    String out = "";
-    out.reserve(in.length() + 8);
-    for (size_t i = 0; i < in.length(); i++) {
-        const char c = in[i];
-        if (c == '\\' || c == '"') {
-            out += '\\';
-            out += c;
-        } else if (c == '\n') {
-            out += "\\n";
-        } else if (c == '\r') {
-            out += "\\r";
-        } else {
-            out += c;
-        }
-    }
-    return out;
-}
-
-void addKeyLog(const String& line) {
-    if (line.length() == 0) {
-        return;
-    }
-    gKeyLog.push_back(line);
-    while (gKeyLog.size() > MAX_KEY_LOG) {
-        gKeyLog.pop_front();
-    }
-    Serial.println(line);
-}
 
 bool isConfigButtonHeldOnBoot() {
   pinMode(CONFIG_BUTTON_PIN, INPUT);
@@ -178,8 +146,8 @@ String devicesJson() {
         if (i > 0) {
             out += ",";
         }
-        out += "{\"name\":\"" + jsonEscape(gDevices[i].name) + "\",";
-        out += "\"address\":\"" + jsonEscape(gDevices[i].address) + "\",";
+    out += "{\"name\":\"" + JsonUtil::escape(gDevices[i].name) + "\",";
+    out += "\"address\":\"" + JsonUtil::escape(gDevices[i].address) + "\",";
         out += "\"rssi\":" + String(gDevices[i].rssi) + ",";
         out += "\"bonded\":";
         out += gDevices[i].bonded ? "true" : "false";
@@ -193,34 +161,21 @@ String devicesJson() {
     return out;
 }
 
-String keyLogJson() {
-    String out = "[";
-    size_t index = 0;
-    for (const String& line : gKeyLog) {
-        if (index++ > 0) {
-            out += ",";
-        }
-        out += "\"" + jsonEscape(line) + "\"";
-    }
-    out += "]";
-    return out;
-}
-
 void handleState() {
     String out = "{";
     out += "\"connected\":";
   out += BLEKeyboard::isConnected() ? "true" : "false";
-  out += ",\"name\":\"" + jsonEscape(BLEKeyboard::connectedName()) + "\"";
-  out += ",\"address\":\"" + jsonEscape(BLEKeyboard::connectedAddress()) + "\"";
-  out += ",\"bondedAddress\":\"" + jsonEscape(BLEKeyboard::preferredBondedAddress()) + "\"";
-  out += ",\"bondedName\":\"" + jsonEscape(BLEKeyboard::preferredBondedName()) + "\"";
+  out += ",\"name\":\"" + JsonUtil::escape(BLEKeyboard::connectedName()) + "\"";
+  out += ",\"address\":\"" + JsonUtil::escape(BLEKeyboard::connectedAddress()) + "\"";
+  out += ",\"bondedAddress\":\"" + JsonUtil::escape(BLEKeyboard::preferredBondedAddress()) + "\"";
+  out += ",\"bondedName\":\"" + JsonUtil::escape(BLEKeyboard::preferredBondedName()) + "\"";
     out += ",\"lastKey\":\"";
   if (BLEKeyboard::lastKeyCode() > 0) {
     if (BLEKeyboard::lastKeyCode() < 0x10) out += "0";
     out += String(BLEKeyboard::lastKeyCode(), HEX);
     }
     out += "\"";
-    out += ",\"keys\":" + keyLogJson();
+  out += ",\"keys\":" + KeyLog::toJson();
     out += "}";
     server.send(200, "application/json", out);
 }
@@ -283,11 +238,11 @@ void setup() {
     NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
     NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
     NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
-    HttpBridge::begin(addKeyLog, currentBaseUrl, mappedPathForKey);
-    BLEKeyboard::begin(addKeyLog, HttpBridge::onKeyPress);
+    HttpBridge::begin(KeyLog::add, currentBaseUrl, mappedPathForKey);
+    BLEKeyboard::begin(KeyLog::add, HttpBridge::onKeyPress);
 
     ConfigStore::load(gWifiNetworks, gBaseUrl, gKeyMappings);
-    addKeyLog(
+    KeyLog::add(
       String("Config: wifi=") + String(gWifiNetworks.size()) + String(" net(s)") +
       String(" url=") + (gBaseUrl.length() ? gBaseUrl : "(none)") +
       String(" maps=") + String(gKeyMappings.size())
@@ -315,8 +270,7 @@ void setup() {
         &gWifiNetworks,
         &gBaseUrl,
         &gKeyMappings,
-        jsonEscape,
-        addKeyLog,
+        KeyLog::add,
         handleFactoryResetExtras
       };
       WebConfigApi::registerRoutes(server, cfgCtx);
@@ -325,7 +279,7 @@ void setup() {
       Serial.println("\nESP32 BLE Keyboard Hub - CONFIG mode");
       Serial.print("Open GUI at: http://");
       Serial.println(WiFi.softAPIP());
-      addKeyLog("GUI ready");
+      KeyLog::add("GUI ready");
     } else {
       WiFi.mode(WIFI_STA);
       for (const auto& net : gWifiNetworks) {
@@ -333,8 +287,8 @@ void setup() {
       }
       gWifiMulti.run(10000);
       Serial.println("\nESP32 BLE Keyboard Hub - RUN mode");
-      addKeyLog(String("RUN mode: ") + String(gWifiNetworks.size()) + " WiFi network(s) configured");
-      addKeyLog("RUN mode: waiting for keyboard and mapped keypresses");
+      KeyLog::add(String("RUN mode: ") + String(gWifiNetworks.size()) + " WiFi network(s) configured");
+      KeyLog::add("RUN mode: waiting for keyboard and mapped keypresses");
     }
 }
 

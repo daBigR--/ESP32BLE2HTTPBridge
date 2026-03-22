@@ -2,6 +2,8 @@
 
 #include <Preferences.h>
 
+#include "json_util.h"
+
 namespace {
 
 static Preferences gPrefs;
@@ -73,15 +75,14 @@ void save(const std::vector<WifiCredential>& wifiNetworks, const String& baseUrl
 String configJson(
   const std::vector<WifiCredential>& wifiNetworks,
   const String& baseUrl,
-  const std::vector<KeyMapping>& keyMappings,
-  String (*escapeJson)(const String&)
+  const std::vector<KeyMapping>& keyMappings
 ) {
   String out = "{\"wifiNetworks\":["; 
   for (size_t i = 0; i < wifiNetworks.size(); i++) {
     if (i > 0) out += ",";
-    out += "{\"ssid\":\"" + escapeJson(wifiNetworks[i].ssid) + "\"}";
+    out += "{\"ssid\":\"" + JsonUtil::escape(wifiNetworks[i].ssid) + "\"}";
   }
-  out += "],\"baseUrl\":\"" + escapeJson(baseUrl) + "\",\"mappings\":[";
+  out += "],\"baseUrl\":\"" + JsonUtil::escape(baseUrl) + "\",\"mappings\":[";
 
   for (size_t i = 0; i < keyMappings.size(); i++) {
     if (i > 0) {
@@ -91,7 +92,7 @@ String configJson(
     if (keyMappings[i].keyCode < 0x10) {
       out += "0";
     }
-    out += String(keyMappings[i].keyCode, HEX) + "\",\"path\":\"" + escapeJson(keyMappings[i].path) + "\"}";
+    out += String(keyMappings[i].keyCode, HEX) + "\",\"path\":\"" + JsonUtil::escape(keyMappings[i].path) + "\"}";
   }
   out += "]}";
   return out;

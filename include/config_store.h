@@ -23,8 +23,7 @@ void save(const std::vector<WifiCredential>& wifiNetworks, const String& baseUrl
 String configJson(
   const std::vector<WifiCredential>& wifiNetworks,
   const String& baseUrl,
-  const std::vector<KeyMapping>& keyMappings,
-  String (*escapeJson)(const String&)
+  const std::vector<KeyMapping>& keyMappings
 );
 
 bool hasValidRunConfig(

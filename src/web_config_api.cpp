@@ -6,7 +6,7 @@ namespace WebConfigApi {
 
 void registerRoutes(WebServer& server, const Context& ctx) {
   server.on("/config", HTTP_GET, [ctx, &server]() {
-    server.send(200, "application/json", ConfigStore::configJson(*ctx.wifiNetworks, *ctx.baseUrl, *ctx.keyMappings, ctx.jsonEscape));
+    server.send(200, "application/json", ConfigStore::configJson(*ctx.wifiNetworks, *ctx.baseUrl, *ctx.keyMappings));
   });
 
   server.on("/config/seturl", HTTP_GET, [ctx, &server]() {
