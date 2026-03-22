@@ -4,6 +4,11 @@
 
 #include <vector>
 
+struct WifiCredential {
+  String ssid;
+  String password;
+};
+
 struct KeyMapping {
   uint8_t keyCode;
   String path;
@@ -11,20 +16,19 @@ struct KeyMapping {
 
 namespace ConfigStore {
 
-void load(String& wifiSsid, String& wifiPassword, String& baseUrl, std::vector<KeyMapping>& keyMappings);
+void load(std::vector<WifiCredential>& wifiNetworks, String& baseUrl, std::vector<KeyMapping>& keyMappings);
 
-void save(const String& wifiSsid, const String& wifiPassword, const String& baseUrl, const std::vector<KeyMapping>& keyMappings);
+void save(const std::vector<WifiCredential>& wifiNetworks, const String& baseUrl, const std::vector<KeyMapping>& keyMappings);
 
 String configJson(
-  const String& wifiSsid,
-  const String& wifiPassword,
+  const std::vector<WifiCredential>& wifiNetworks,
   const String& baseUrl,
   const std::vector<KeyMapping>& keyMappings,
   String (*escapeJson)(const String&)
 );
 
 bool hasValidRunConfig(
-  const String& wifiSsid,
+  const std::vector<WifiCredential>& wifiNetworks,
   const String& baseUrl,
   const std::vector<KeyMapping>& keyMappings,
   const String& preferredBondedAddress

@@ -138,11 +138,12 @@ const char PAGE[] PROGMEM = R"HTML(
     <div class="card">
       <h2>Key Mapping Configuration</h2>
       <div class="cfg-section">
-        <label class="cfg-label">WiFi Router</label>
+        <label class="cfg-label">WiFi Networks</label>
+        <div id="wifiNetworksList" style="margin-bottom:8px"></div>
         <div class="row" style="gap:8px;margin-bottom:8px">
           <input type="text" id="wifiSsidInput" placeholder="SSID" style="flex:1" />
           <input type="text" id="wifiPwdInput" placeholder="Password" style="flex:1" />
-          <button onclick="saveWifi()">Save WiFi</button>
+          <button onclick="addWifi()">Add</button>
         </div>
       </div>
       <div class="cfg-section">
@@ -317,18 +318,42 @@ const char PAGE[] PROGMEM = R"HTML(
     async function loadConfig() {
       const r = await fetch('/config');
       const c = await r.json();
-      document.getElementById('wifiSsidInput').value = c.wifiSsid || '';
-      document.getElementById('wifiPwdInput').value = c.wifiPassword || '';
+      renderWifiNetworks(c.wifiNetworks || []);
       document.getElementById('baseUrlInput').value = c.baseUrl || '';
       renderMappings(c.mappings || []);
     }
 
-    async function saveWifi() {
+    let wifiNets = [];
+
+    function renderWifiNetworks(nets) {
+      wifiNets = nets;
+      const el = document.getElementById('wifiNetworksList');
+      if (!nets.length) {
+        el.innerHTML = '<div style="color:var(--muted);font-size:0.9rem">No networks saved.</div>';
+        return;
+      }
+      el.innerHTML = nets.map((n, i) =>
+        `<div class="mapping-row"><span style="flex:1">${n.ssid}</span><button class="warn" style="padding:5px 10px;font-size:0.8rem" onclick="deleteWifi(${i})">Del</button></div>`
+      ).join('');
+    }
+
+    async function addWifi() {
       const ssid = document.getElementById('wifiSsidInput').value.trim();
       const pwd = document.getElementById('wifiPwdInput').value;
       if (!ssid) { status('Enter WiFi SSID first'); return; }
-      await fetch('/config/setwifi?ssid=' + encodeURIComponent(ssid) + '&pwd=' + encodeURIComponent(pwd));
-      status('WiFi credentials saved');
+      await fetch('/config/addwifi?ssid=' + encodeURIComponent(ssid) + '&pwd=' + encodeURIComponent(pwd));
+      document.getElementById('wifiSsidInput').value = '';
+      document.getElementById('wifiPwdInput').value = '';
+      await loadConfig();
+      status('WiFi network saved');
+    }
+
+    async function deleteWifi(idx) {
+      const net = wifiNets[idx];
+      if (!net) return;
+      await fetch('/config/delwifi?ssid=' + encodeURIComponent(net.ssid));
+      await loadConfig();
+      status('WiFi network removed');
     }
 
     function renderMappings(mappings) {

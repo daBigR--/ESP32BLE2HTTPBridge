@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 #include <WiFi.h>
+#include <WiFiMulti.h>
 #include <WebServer.h>
 #include <algorithm>
 
@@ -35,8 +36,8 @@ static std::deque<String> gKeyLog;
 static const size_t MAX_KEY_LOG = 40;
 
 static String gBaseUrl = "";
-static String gWifiSsid = "";
-static String gWifiPassword = "";
+static std::vector<WifiCredential> gWifiNetworks;
+static WiFiMulti gWifiMulti;
 static std::vector<KeyMapping> gKeyMappings;
 static bool gConfigMode = true;
 
@@ -285,15 +286,15 @@ void setup() {
     HttpBridge::begin(addKeyLog, currentBaseUrl, mappedPathForKey);
     BLEKeyboard::begin(addKeyLog, HttpBridge::onKeyPress);
 
-    ConfigStore::load(gWifiSsid, gWifiPassword, gBaseUrl, gKeyMappings);
+    ConfigStore::load(gWifiNetworks, gBaseUrl, gKeyMappings);
     addKeyLog(
-      String("Config: wifi=") + (gWifiSsid.length() ? gWifiSsid : "(none)") +
+      String("Config: wifi=") + String(gWifiNetworks.size()) + String(" net(s)") +
       String(" url=") + (gBaseUrl.length() ? gBaseUrl : "(none)") +
       String(" maps=") + String(gKeyMappings.size())
     );
     BLEKeyboard::refreshPreferredBondedDevice();
 
-    bool runConfigReady = ConfigStore::hasValidRunConfig(gWifiSsid, gBaseUrl, gKeyMappings, BLEKeyboard::preferredBondedAddress());
+    bool runConfigReady = ConfigStore::hasValidRunConfig(gWifiNetworks, gBaseUrl, gKeyMappings, BLEKeyboard::preferredBondedAddress());
     gConfigMode = forceConfigMode || !runConfigReady;
 
     if (gConfigMode) {
@@ -311,8 +312,7 @@ void setup() {
       });
       server.on("/state", HTTP_GET, handleState);
       WebConfigApi::Context cfgCtx = {
-        &gWifiSsid,
-        &gWifiPassword,
+        &gWifiNetworks,
         &gBaseUrl,
         &gKeyMappings,
         jsonEscape,
@@ -328,9 +328,12 @@ void setup() {
       addKeyLog("GUI ready");
     } else {
       WiFi.mode(WIFI_STA);
-      WiFi.begin(gWifiSsid.c_str(), gWifiPassword.c_str());
+      for (const auto& net : gWifiNetworks) {
+        gWifiMulti.addAP(net.ssid.c_str(), net.password.c_str());
+      }
+      gWifiMulti.run(10000);
       Serial.println("\nESP32 BLE Keyboard Hub - RUN mode");
-      addKeyLog(String("RUN mode WiFi SSID: ") + gWifiSsid);
+      addKeyLog(String("RUN mode: ") + String(gWifiNetworks.size()) + " WiFi network(s) configured");
       addKeyLog("RUN mode: waiting for keyboard and mapped keypresses");
     }
 }
@@ -342,6 +345,11 @@ void loop() {
     BLEKeyboard::syncConnectionState();
     BLEKeyboard::maybeAutoConnectBondedKeyboard();
     if (!gConfigMode) {
+      static unsigned long lastWifiCheck = 0;
+      if (WiFi.status() != WL_CONNECTED && millis() - lastWifiCheck > 5000) {
+        gWifiMulti.run(500);
+        lastWifiCheck = millis();
+      }
       HttpBridge::processPendingKeys();
     }
     delay(10);

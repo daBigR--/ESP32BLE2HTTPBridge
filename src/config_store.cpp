@@ -10,11 +10,30 @@ static Preferences gPrefs;
 
 namespace ConfigStore {
 
-void load(String& wifiSsid, String& wifiPassword, String& baseUrl, std::vector<KeyMapping>& keyMappings) {
+void load(std::vector<WifiCredential>& wifiNetworks, String& baseUrl, std::vector<KeyMapping>& keyMappings) {
   gPrefs.begin("ble_cfg", true);
-  wifiSsid = gPrefs.getString("wifissid", "");
-  wifiPassword = gPrefs.getString("wifipass", "");
   baseUrl = gPrefs.getString("baseurl", "");
+
+  wifiNetworks.clear();
+  if (gPrefs.isKey("n_nets")) {
+    uint8_t nNets = gPrefs.getUChar("n_nets", 0);
+    for (uint8_t i = 0; i < nNets && i < 8; i++) {
+      String sk = String("ns") + String(i);
+      String pk = String("np") + String(i);
+      String ssid = gPrefs.getString(sk.c_str(), "");
+      String pass = gPrefs.getString(pk.c_str(), "");
+      if (ssid.length() > 0) {
+        wifiNetworks.push_back({ssid, pass});
+      }
+    }
+  } else {
+    // Migrate old single-SSID format
+    String oldSsid = gPrefs.getString("wifissid", "");
+    String oldPass = gPrefs.getString("wifipass", "");
+    if (oldSsid.length() > 0) {
+      wifiNetworks.push_back({oldSsid, oldPass});
+    }
+  }
 
   uint8_t n = gPrefs.getUChar("n_maps", 0);
   keyMappings.clear();
@@ -30,10 +49,15 @@ void load(String& wifiSsid, String& wifiPassword, String& baseUrl, std::vector<K
   gPrefs.end();
 }
 
-void save(const String& wifiSsid, const String& wifiPassword, const String& baseUrl, const std::vector<KeyMapping>& keyMappings) {
+void save(const std::vector<WifiCredential>& wifiNetworks, const String& baseUrl, const std::vector<KeyMapping>& keyMappings) {
   gPrefs.begin("ble_cfg", false);
-  gPrefs.putString("wifissid", wifiSsid);
-  gPrefs.putString("wifipass", wifiPassword);
+  gPrefs.putUChar("n_nets", (uint8_t)wifiNetworks.size());
+  for (size_t i = 0; i < wifiNetworks.size() && i < 8; i++) {
+    String sk = String("ns") + String(i);
+    String pk = String("np") + String(i);
+    gPrefs.putString(sk.c_str(), wifiNetworks[i].ssid);
+    gPrefs.putString(pk.c_str(), wifiNetworks[i].password);
+  }
   gPrefs.putString("baseurl", baseUrl);
   gPrefs.putUChar("n_maps", (uint8_t)keyMappings.size());
 
@@ -47,15 +71,17 @@ void save(const String& wifiSsid, const String& wifiPassword, const String& base
 }
 
 String configJson(
-  const String& wifiSsid,
-  const String& wifiPassword,
+  const std::vector<WifiCredential>& wifiNetworks,
   const String& baseUrl,
   const std::vector<KeyMapping>& keyMappings,
   String (*escapeJson)(const String&)
 ) {
-  String out = "{\"wifiSsid\":\"" + escapeJson(wifiSsid) + "\",";
-  out += "\"wifiPassword\":\"" + escapeJson(wifiPassword) + "\",";
-  out += "\"baseUrl\":\"" + escapeJson(baseUrl) + "\",\"mappings\":[";
+  String out = "{\"wifiNetworks\":["; 
+  for (size_t i = 0; i < wifiNetworks.size(); i++) {
+    if (i > 0) out += ",";
+    out += "{\"ssid\":\"" + escapeJson(wifiNetworks[i].ssid) + "\"}";
+  }
+  out += "],\"baseUrl\":\"" + escapeJson(baseUrl) + "\",\"mappings\":[";
 
   for (size_t i = 0; i < keyMappings.size(); i++) {
     if (i > 0) {
@@ -72,12 +98,12 @@ String configJson(
 }
 
 bool hasValidRunConfig(
-  const String& wifiSsid,
+  const std::vector<WifiCredential>& wifiNetworks,
   const String& baseUrl,
   const std::vector<KeyMapping>& keyMappings,
   const String& preferredBondedAddress
 ) {
-  if (wifiSsid.length() == 0) {
+  if (wifiNetworks.empty()) {
     return false;
   }
   if (baseUrl.length() == 0) {

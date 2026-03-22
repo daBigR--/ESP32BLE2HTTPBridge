@@ -10,8 +10,7 @@
 namespace WebConfigApi {
 
 struct Context {
-  String* wifiSsid;
-  String* wifiPassword;
+  std::vector<WifiCredential>* wifiNetworks;
   String* baseUrl;
   std::vector<KeyMapping>* keyMappings;
   String (*jsonEscape)(const String&);
