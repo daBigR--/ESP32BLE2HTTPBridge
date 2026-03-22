@@ -2,7 +2,6 @@
 #include <NimBLEDevice.h>
 #include <WiFi.h>
 #include <WebServer.h>
-#include <HTTPClient.h>
 #include <algorithm>
 
 #include <deque>
@@ -10,6 +9,7 @@
 
 #include "ble_keyboard.h"
 #include "config_store.h"
+#include "http_bridge.h"
 
 #define HID_SERVICE_UUID      "1812"
 #define HID_INPUT_REPORT_UUID "2A4D"
@@ -36,21 +36,14 @@ static String gBaseUrl = "";
 static String gWifiSsid = "";
 static String gWifiPassword = "";
 static std::vector<KeyMapping> gKeyMappings;
-static std::deque<uint8_t> gPendingKeyCodes;
 static bool gConfigMode = true;
-static uint8_t gLastDispatchedKeyCode = 0;
-static unsigned long gLastDispatchMs = 0;
 
 static const uint8_t CONFIG_BUTTON_PIN = D9;
 static const unsigned long CONFIG_BUTTON_HOLD_MS = 800;
-static const unsigned long KEY_REPEAT_FILTER_MS = 120;
 
 void addKeyLog(const String& line);
 bool isConfigButtonHeldOnBoot();
 String mappedPathForKey(uint8_t keyCode);
-void queueKeyPress(uint8_t keyCode);
-void dispatchKeyHttp(uint8_t keyCode);
-void processPendingKeys();
 void handleConfigGet();
 void handleSetUrl();
 void handleSetWifi();
@@ -113,66 +106,8 @@ String mappedPathForKey(uint8_t keyCode) {
   return "";
 }
 
-void queueKeyPress(uint8_t keyCode) {
-  if (keyCode == 0) {
-    return;
-  }
-  if (gPendingKeyCodes.size() >= 24) {
-    gPendingKeyCodes.pop_front();
-  }
-  gPendingKeyCodes.push_back(keyCode);
-}
-
-void dispatchKeyHttp(uint8_t keyCode) {
-  String path = mappedPathForKey(keyCode);
-  if (path.length() == 0) {
-    return;
-  }
-
-  if (WiFi.status() != WL_CONNECTED) {
-    addKeyLog("HTTP skipped: WiFi not connected");
-    return;
-  }
-
-  String url = gBaseUrl;
-  bool baseHasSlash = url.endsWith("/");
-  bool pathHasSlash = path.startsWith("/");
-  if (baseHasSlash && pathHasSlash) {
-    url.remove(url.length() - 1);
-  } else if (!baseHasSlash && !pathHasSlash) {
-    url += "/";
-  }
-  url += path;
-
-  HTTPClient http;
-  if (!http.begin(url)) {
-    addKeyLog(String("HTTP begin failed: ") + url);
-    return;
-  }
-
-  int rc = http.GET();
-  if (rc > 0) {
-    addKeyLog(String("HTTP GET ") + url + String(" -> ") + String(rc));
-  } else {
-    addKeyLog(String("HTTP GET failed: ") + HTTPClient::errorToString(rc));
-  }
-  http.end();
-}
-
-void processPendingKeys() {
-  while (!gPendingKeyCodes.empty()) {
-    uint8_t keyCode = gPendingKeyCodes.front();
-    gPendingKeyCodes.pop_front();
-
-    unsigned long now = millis();
-    if (keyCode == gLastDispatchedKeyCode && (now - gLastDispatchMs) < KEY_REPEAT_FILTER_MS) {
-      continue;
-    }
-
-    gLastDispatchedKeyCode = keyCode;
-    gLastDispatchMs = now;
-    dispatchKeyHttp(keyCode);
-  }
+String currentBaseUrl() {
+  return gBaseUrl;
 }
 
 void performScan() {
@@ -861,7 +796,8 @@ void setup() {
     NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
     NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
     NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
-    BLEKeyboard::begin(addKeyLog, queueKeyPress);
+    HttpBridge::begin(addKeyLog, currentBaseUrl, mappedPathForKey);
+    BLEKeyboard::begin(addKeyLog, HttpBridge::onKeyPress);
 
     ConfigStore::load(gWifiSsid, gWifiPassword, gBaseUrl, gKeyMappings);
     addKeyLog(
@@ -917,7 +853,7 @@ void loop() {
     BLEKeyboard::syncConnectionState();
     BLEKeyboard::maybeAutoConnectBondedKeyboard();
     if (!gConfigMode) {
-      processPendingKeys();
+      HttpBridge::processPendingKeys();
     }
     delay(10);
 }
