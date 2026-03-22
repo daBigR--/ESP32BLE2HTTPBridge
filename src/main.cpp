@@ -11,8 +11,8 @@
 #include "ble_scanner.h"
 #include "config_store.h"
 #include "http_bridge.h"
-#include "json_util.h"
 #include "key_log.h"
+#include "web_ble_api.h"
 #include "web_config_api.h"
 #include "web_page.h"
 
@@ -65,67 +65,10 @@ String currentBaseUrl() {
   return gBaseUrl;
 }
 
-void handleState() {
-    String out = "{";
-    out += "\"connected\":";
-  out += BLEKeyboard::isConnected() ? "true" : "false";
-  out += ",\"name\":\"" + JsonUtil::escape(BLEKeyboard::connectedName()) + "\"";
-  out += ",\"address\":\"" + JsonUtil::escape(BLEKeyboard::connectedAddress()) + "\"";
-  out += ",\"bondedAddress\":\"" + JsonUtil::escape(BLEKeyboard::preferredBondedAddress()) + "\"";
-  out += ",\"bondedName\":\"" + JsonUtil::escape(BLEKeyboard::preferredBondedName()) + "\"";
-    out += ",\"lastKey\":\"";
-  if (BLEKeyboard::lastKeyCode() > 0) {
-    if (BLEKeyboard::lastKeyCode() < 0x10) out += "0";
-    out += String(BLEKeyboard::lastKeyCode(), HEX);
-    }
-    out += "\"";
-  out += ",\"keys\":" + KeyLog::toJson();
-    out += "}";
-    server.send(200, "application/json", out);
-}
-
 void handleFactoryResetExtras() {
     NimBLEDevice::deleteAllBonds();
     BLEKeyboard::clearPreferredBondedDevice();
 }
-
-void handleScan() {
-  BleScanner::performScan();
-  String out = "{\"devices\":" + BleScanner::devicesJson() + "}";
-    server.send(200, "application/json", out);
-}
-
-void handleConnect() {
-    if (!server.hasArg("addr")) {
-        server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing addr\"}");
-        return;
-    }
-    const String addr = server.arg("addr");
-    const String name = server.hasArg("name") ? server.arg("name") : "";
-    const bool ok = BLEKeyboard::connectToKeyboard(addr, name);
-    server.send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"connect failed or device not bonded\"}");
-  }
-
-  void handlePair() {
-    if (!server.hasArg("addr")) {
-      server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing addr\"}");
-      return;
-    }
-    const String addr = server.arg("addr");
-    const String name = server.hasArg("name") ? server.arg("name") : "";
-    const bool ok = BLEKeyboard::pairKeyboard(addr, name);
-    server.send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"pair failed (device may not accept new bonding now)\"}");
-}
-
-  void handleUnpair() {
-    if (!server.hasArg("addr")) {
-      server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing addr\"}");
-      return;
-    }
-    const String addr = server.arg("addr");
-    const bool ok = BLEKeyboard::unpairKeyboard(addr);
-    server.send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"unpair failed\"}");
-  }
 
 void setup() {
     Serial.begin(115200);
@@ -161,15 +104,7 @@ void setup() {
       WiFi.softAP(AP_SSID, AP_PASSWORD);
 
       server.on("/", HTTP_GET, []() { server.send(200, "text/html", PAGE); });
-      server.on("/scan", HTTP_GET, handleScan);
-      server.on("/pair", HTTP_GET, handlePair);
-      server.on("/connect", HTTP_GET, handleConnect);
-      server.on("/unpair", HTTP_GET, handleUnpair);
-      server.on("/disconnect", HTTP_GET, []() {
-          BLEKeyboard::disconnectKeyboard();
-          server.send(200, "application/json", "{\"ok\":true}");
-      });
-      server.on("/state", HTTP_GET, handleState);
+      WebBleApi::registerRoutes(server);
       WebConfigApi::Context cfgCtx = {
         &gWifiNetworks,
         &gBaseUrl,
