@@ -10,6 +10,7 @@
 #include "ble_keyboard.h"
 #include "config_store.h"
 #include "http_bridge.h"
+#include "web_config_api.h"
 #include "web_page.h"
 
 #define HID_SERVICE_UUID      "1812"
@@ -45,13 +46,7 @@ static const unsigned long CONFIG_BUTTON_HOLD_MS = 800;
 void addKeyLog(const String& line);
 bool isConfigButtonHeldOnBoot();
 String mappedPathForKey(uint8_t keyCode);
-void handleConfigGet();
-void handleSetUrl();
-void handleSetWifi();
-void handleSetMapping();
-void handleDelMapping();
-void handleReboot();
-void handleFactoryReset();
+void handleFactoryResetExtras();
 
 String jsonEscape(const String& in) {
     String out = "";
@@ -229,92 +224,9 @@ void handleState() {
     server.send(200, "application/json", out);
 }
 
-void handleConfigGet() {
-  server.send(200, "application/json", ConfigStore::configJson(gWifiSsid, gWifiPassword, gBaseUrl, gKeyMappings, jsonEscape));
-}
-
-void handleSetUrl() {
-    if (!server.hasArg("url")) {
-        server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing url\"}");
-        return;
-    }
-    gBaseUrl = server.arg("url");
-    ConfigStore::save(gWifiSsid, gWifiPassword, gBaseUrl, gKeyMappings);
-    addKeyLog(String("Base URL: ") + gBaseUrl);
-    server.send(200, "application/json", "{\"ok\":true}");
-}
-
-  void handleSetWifi() {
-    if (!server.hasArg("ssid")) {
-      server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing ssid\"}");
-      return;
-    }
-    gWifiSsid = server.arg("ssid");
-    gWifiPassword = server.hasArg("pwd") ? server.arg("pwd") : "";
-    ConfigStore::save(gWifiSsid, gWifiPassword, gBaseUrl, gKeyMappings);
-    addKeyLog(String("WiFi SSID: ") + gWifiSsid);
-    server.send(200, "application/json", "{\"ok\":true}");
-  }
-
-void handleSetMapping() {
-    if (!server.hasArg("key") || !server.hasArg("path")) {
-        server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing key or path\"}");
-        return;
-    }
-    uint8_t code = (uint8_t)strtol(server.arg("key").c_str(), nullptr, 16);
-    String path = server.arg("path");
-    for (auto& m : gKeyMappings) {
-        if (m.keyCode == code) {
-            m.path = path;
-        ConfigStore::save(gWifiSsid, gWifiPassword, gBaseUrl, gKeyMappings);
-            server.send(200, "application/json", "{\"ok\":true}");
-            return;
-        }
-    }
-    gKeyMappings.push_back({code, path});
-    ConfigStore::save(gWifiSsid, gWifiPassword, gBaseUrl, gKeyMappings);
-    addKeyLog(String("Map 0x") + String(code, HEX) + String(" -> ") + path);
-    server.send(200, "application/json", "{\"ok\":true}");
-}
-
-void handleDelMapping() {
-    if (!server.hasArg("key")) {
-        server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing key\"}");
-        return;
-    }
-    uint8_t code = (uint8_t)strtol(server.arg("key").c_str(), nullptr, 16);
-    size_t before = gKeyMappings.size();
-    gKeyMappings.erase(
-        std::remove_if(gKeyMappings.begin(), gKeyMappings.end(),
-            [code](const KeyMapping& m){ return m.keyCode == code; }),
-        gKeyMappings.end()
-    );
-    if (gKeyMappings.size() == before) {
-        server.send(200, "application/json", "{\"ok\":false,\"error\":\"key not found\"}");
-        return;
-    }
-    ConfigStore::save(gWifiSsid, gWifiPassword, gBaseUrl, gKeyMappings);
-    addKeyLog(String("Del map 0x") + String(code, HEX));
-    server.send(200, "application/json", "{\"ok\":true}");
-}
-
-void handleReboot() {
-    server.send(200, "application/json", "{\"ok\":true}");
-    delay(300);
-    ESP.restart();
-}
-
-void handleFactoryReset() {
+void handleFactoryResetExtras() {
     NimBLEDevice::deleteAllBonds();
-  ConfigStore::clearAll();
-    gBaseUrl = "";
-    gWifiSsid = "";
-    gWifiPassword = "";
-    gKeyMappings.clear();
     BLEKeyboard::clearPreferredBondedDevice();
-    server.send(200, "application/json", "{\"ok\":true}");
-    delay(300);
-    ESP.restart();
 }
 
 void handleScan() {
@@ -398,13 +310,16 @@ void setup() {
           server.send(200, "application/json", "{\"ok\":true}");
       });
       server.on("/state", HTTP_GET, handleState);
-      server.on("/config", HTTP_GET, handleConfigGet);
-      server.on("/config/seturl", HTTP_GET, handleSetUrl);
-      server.on("/config/setwifi", HTTP_GET, handleSetWifi);
-      server.on("/config/setmapping", HTTP_GET, handleSetMapping);
-      server.on("/config/delmapping", HTTP_GET, handleDelMapping);
-      server.on("/reboot", HTTP_GET, handleReboot);
-      server.on("/factory-reset", HTTP_GET, handleFactoryReset);
+      WebConfigApi::Context cfgCtx = {
+        &gWifiSsid,
+        &gWifiPassword,
+        &gBaseUrl,
+        &gKeyMappings,
+        jsonEscape,
+        addKeyLog,
+        handleFactoryResetExtras
+      };
+      WebConfigApi::registerRoutes(server, cfgCtx);
       server.begin();
 
       Serial.println("\nESP32 BLE Keyboard Hub - CONFIG mode");
