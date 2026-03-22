@@ -32,10 +32,22 @@ static bool gConfigMode = true;
 
 static const uint8_t CONFIG_BUTTON_PIN = D9;
 static const unsigned long CONFIG_BUTTON_HOLD_MS = 800;
+static const uint8_t BLE_LED_PIN = D1;
+static const uint8_t HTTP_LED_PIN = D3;
+static const unsigned long BLE_KEY_BLINK_OFF_MS = 180;
+static const unsigned long HTTP_GET_PULSE_MS = 90;
+static const unsigned long HTTP_200_PULSE_MS = 220;
+
+static unsigned long gBleLedForceOffUntilMs = 0;
+static unsigned long gHttpLedOnUntilMs = 0;
 
 bool isConfigButtonHeldOnBoot();
 String mappedPathForKey(uint8_t keyCode);
 void handleFactoryResetExtras();
+void onBleKeyPress(uint8_t keyCode);
+void onHttpGetStart();
+void onHttpGetResult(int statusCode);
+void updateStatusLeds();
 
 bool isConfigButtonHeldOnBoot() {
   pinMode(CONFIG_BUTTON_PIN, INPUT);
@@ -70,8 +82,47 @@ void handleFactoryResetExtras() {
     BLEKeyboard::clearPreferredBondedDevice();
 }
 
+void onBleKeyPress(uint8_t keyCode) {
+  // Keep BLE activity indication local, then forward to HTTP bridge.
+  gBleLedForceOffUntilMs = millis() + BLE_KEY_BLINK_OFF_MS;
+  digitalWrite(BLE_LED_PIN, LOW);
+  HttpBridge::onKeyPress(keyCode);
+}
+
+void onHttpGetStart() {
+  unsigned long until = millis() + HTTP_GET_PULSE_MS;
+  if (until > gHttpLedOnUntilMs) {
+    gHttpLedOnUntilMs = until;
+  }
+  digitalWrite(HTTP_LED_PIN, HIGH);
+}
+
+void onHttpGetResult(int statusCode) {
+  if (statusCode == 200) {
+    unsigned long until = millis() + HTTP_200_PULSE_MS;
+    if (until > gHttpLedOnUntilMs) {
+      gHttpLedOnUntilMs = until;
+    }
+  }
+}
+
+void updateStatusLeds() {
+  unsigned long now = millis();
+  bool bleConnected = BLEKeyboard::isConnected();
+  bool bleLedOn = bleConnected && (now >= gBleLedForceOffUntilMs);
+  bool httpLedOn = now < gHttpLedOnUntilMs;
+
+  digitalWrite(BLE_LED_PIN, bleLedOn ? HIGH : LOW);
+  digitalWrite(HTTP_LED_PIN, httpLedOn ? HIGH : LOW);
+}
+
 void setup() {
     Serial.begin(115200);
+
+  pinMode(BLE_LED_PIN, OUTPUT);
+  pinMode(HTTP_LED_PIN, OUTPUT);
+  digitalWrite(BLE_LED_PIN, LOW);
+  digitalWrite(HTTP_LED_PIN, LOW);
 
     // Check boot button FIRST, before any slow init, so the user doesn't
     // have to hold it for longer than CONFIG_BUTTON_HOLD_MS.
@@ -86,7 +137,8 @@ void setup() {
     NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
     NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
     HttpBridge::begin(KeyLog::add, currentBaseUrl, mappedPathForKey);
-    BLEKeyboard::begin(KeyLog::add, HttpBridge::onKeyPress);
+    HttpBridge::setGetCallbacks(onHttpGetStart, onHttpGetResult);
+    BLEKeyboard::begin(KeyLog::add, onBleKeyPress);
 
     ConfigStore::load(gWifiNetworks, gBaseUrl, gKeyMappings);
     KeyLog::add(
@@ -145,5 +197,6 @@ void loop() {
       }
       HttpBridge::processPendingKeys();
     }
+    updateStatusLeds();
     delay(10);
 }

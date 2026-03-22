@@ -15,6 +15,8 @@ const unsigned long KEY_REPEAT_FILTER_MS = 120;
 HttpBridge::LogFn gLogFn = nullptr;
 HttpBridge::BaseUrlFn gBaseUrlFn = nullptr;
 HttpBridge::MappedPathFn gMappedPathFn = nullptr;
+HttpBridge::GetStartFn gGetStartFn = nullptr;
+HttpBridge::GetResultFn gGetResultFn = nullptr;
 
 void addKeyLog(const String& line) {
   if (gLogFn) {
@@ -53,7 +55,14 @@ void dispatchKeyHttp(uint8_t keyCode) {
     return;
   }
 
+  if (gGetStartFn) {
+    gGetStartFn();
+  }
+
   int rc = http.GET();
+  if (gGetResultFn) {
+    gGetResultFn(rc);
+  }
   if (rc > 0) {
     addKeyLog(String("HTTP GET ") + url + String(" -> ") + String(rc));
   } else {
@@ -70,6 +79,11 @@ void begin(LogFn logFn, BaseUrlFn baseUrlFn, MappedPathFn mappedPathFn) {
   gLogFn = logFn;
   gBaseUrlFn = baseUrlFn;
   gMappedPathFn = mappedPathFn;
+}
+
+void setGetCallbacks(GetStartFn getStartFn, GetResultFn getResultFn) {
+  gGetStartFn = getStartFn;
+  gGetResultFn = getResultFn;
 }
 
 void onKeyPress(uint8_t keyCode) {
