@@ -34,6 +34,7 @@ static const uint8_t CONFIG_BUTTON_PIN = D9;
 static const unsigned long CONFIG_BUTTON_HOLD_MS = 800;
 static const uint8_t BLE_LED_PIN = D1;
 static const uint8_t HTTP_LED_PIN = D3;
+static const unsigned long CONFIG_ALT_HALF_CYCLE_MS = 500;
 static const unsigned long BLE_KEY_BLINK_OFF_MS = 180;
 static const unsigned long HTTP_GET_PULSE_MS = 90;
 static const unsigned long HTTP_200_PULSE_MS = 220;
@@ -108,6 +109,14 @@ void onHttpGetResult(int statusCode) {
 
 void updateStatusLeds() {
   unsigned long now = millis();
+
+  if (gConfigMode) {
+    bool firstHalf = ((now / CONFIG_ALT_HALF_CYCLE_MS) % 2) == 0;
+    digitalWrite(BLE_LED_PIN, firstHalf ? HIGH : LOW);
+    digitalWrite(HTTP_LED_PIN, firstHalf ? LOW : HIGH);
+    return;
+  }
+
   bool bleConnected = BLEKeyboard::isConnected();
   bool bleLedOn = bleConnected && (now >= gBleLedForceOffUntilMs);
   bool httpLedOn = now < gHttpLedOnUntilMs;
