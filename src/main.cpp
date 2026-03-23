@@ -35,12 +35,14 @@ static const unsigned long CONFIG_BUTTON_HOLD_MS = 800;
 static const uint8_t BLE_LED_PIN = D1;
 static const uint8_t HTTP_LED_PIN = D3;
 static const unsigned long CONFIG_ALT_HALF_CYCLE_MS = 500;
-static const unsigned long BLE_KEY_BLINK_OFF_MS = 180;
-static const unsigned long HTTP_GET_PULSE_MS = 90;
-static const unsigned long HTTP_200_PULSE_MS = 220;
+static const unsigned long BLE_KEY_BLINK_OFF_MS = 80;
+static const unsigned long BLE_KEY_BLINK_ON_MS = 80;
+static const uint8_t BLE_KEY_BLINK_COUNT = 2;
+static const unsigned long HTTP_200_PULSE_MS = 180;
 
-static unsigned long gBleLedForceOffUntilMs = 0;
-static unsigned long gHttpLedOnUntilMs = 0;
+static unsigned long gBleLedBlinkStartMs = 0;
+static unsigned long gBleLedBlinkEndMs = 0;
+static unsigned long gHttpLedForceOffUntilMs = 0;
 
 bool isConfigButtonHeldOnBoot();
 String mappedPathForKey(uint8_t keyCode);
@@ -85,24 +87,22 @@ void handleFactoryResetExtras() {
 
 void onBleKeyPress(uint8_t keyCode) {
   // Keep BLE activity indication local, then forward to HTTP bridge.
-  gBleLedForceOffUntilMs = millis() + BLE_KEY_BLINK_OFF_MS;
+  unsigned long now = millis();
+  gBleLedBlinkStartMs = now;
+  gBleLedBlinkEndMs = now + (BLE_KEY_BLINK_COUNT * (BLE_KEY_BLINK_OFF_MS + BLE_KEY_BLINK_ON_MS));
   digitalWrite(BLE_LED_PIN, LOW);
   HttpBridge::onKeyPress(keyCode);
 }
 
 void onHttpGetStart() {
-  unsigned long until = millis() + HTTP_GET_PULSE_MS;
-  if (until > gHttpLedOnUntilMs) {
-    gHttpLedOnUntilMs = until;
-  }
-  digitalWrite(HTTP_LED_PIN, HIGH);
+  // Intentionally no LED action on GET start.
 }
 
 void onHttpGetResult(int statusCode) {
   if (statusCode == 200) {
     unsigned long until = millis() + HTTP_200_PULSE_MS;
-    if (until > gHttpLedOnUntilMs) {
-      gHttpLedOnUntilMs = until;
+    if (until > gHttpLedForceOffUntilMs) {
+      gHttpLedForceOffUntilMs = until;
     }
   }
 }
@@ -118,8 +118,18 @@ void updateStatusLeds() {
   }
 
   bool bleConnected = BLEKeyboard::isConnected();
-  bool bleLedOn = bleConnected && (now >= gBleLedForceOffUntilMs);
-  bool httpLedOn = now < gHttpLedOnUntilMs;
+  bool bleLedOn = bleConnected;
+  if (bleLedOn && now < gBleLedBlinkEndMs) {
+    unsigned long elapsed = now - gBleLedBlinkStartMs;
+    unsigned long cycle = BLE_KEY_BLINK_OFF_MS + BLE_KEY_BLINK_ON_MS;
+    unsigned long phase = elapsed % cycle;
+    bleLedOn = phase >= BLE_KEY_BLINK_OFF_MS;
+  }
+  bool wifiConnected = WiFi.status() == WL_CONNECTED;
+  bool httpLedOn = wifiConnected;
+  if (httpLedOn && now < gHttpLedForceOffUntilMs) {
+    httpLedOn = false;
+  }
 
   digitalWrite(BLE_LED_PIN, bleLedOn ? HIGH : LOW);
   digitalWrite(HTTP_LED_PIN, httpLedOn ? HIGH : LOW);
