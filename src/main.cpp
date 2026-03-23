@@ -40,9 +40,12 @@ static const unsigned long BLE_KEY_BLINK_ON_MS = 80;
 static const uint8_t BLE_KEY_BLINK_COUNT = 2;
 static const unsigned long HTTP_200_PULSE_MS = 180;
 
-static unsigned long gBleLedBlinkStartMs = 0;
-static unsigned long gBleLedBlinkEndMs = 0;
-static unsigned long gHttpLedForceOffUntilMs = 0;
+// Shared between main-loop/BLE callbacks (writers) and the LED task (reader).
+// 32-bit aligned writes on Xtensa LX7 are atomic; volatile prevents
+// the compiler from caching stale values across task contexts.
+static volatile unsigned long gBleLedBlinkStartMs = 0;
+static volatile unsigned long gBleLedBlinkEndMs = 0;
+static volatile unsigned long gHttpLedForceOffUntilMs = 0;
 
 bool isConfigButtonHeldOnBoot();
 String mappedPathForKey(uint8_t keyCode);
@@ -86,11 +89,10 @@ void handleFactoryResetExtras() {
 }
 
 void onBleKeyPress(uint8_t keyCode) {
-  // Keep BLE activity indication local, then forward to HTTP bridge.
+  // Record blink window; the LED task will drive the pin.
   unsigned long now = millis();
   gBleLedBlinkStartMs = now;
   gBleLedBlinkEndMs = now + (BLE_KEY_BLINK_COUNT * (BLE_KEY_BLINK_OFF_MS + BLE_KEY_BLINK_ON_MS));
-  digitalWrite(BLE_LED_PIN, LOW);
   HttpBridge::onKeyPress(keyCode);
 }
 
@@ -135,6 +137,18 @@ void updateStatusLeds() {
   digitalWrite(HTTP_LED_PIN, httpLedOn ? HIGH : LOW);
 }
 
+// Dedicated LED task — pinned to Core 1 (APP_CPU) so BLE/WiFi stacks on
+// Core 0 are completely undisturbed.  Runs every 5 ms with vTaskDelayUntil
+// for jitter-free timing regardless of main-loop blocking.
+static void ledTask(void* /*pvParameters*/) {
+  const TickType_t period = pdMS_TO_TICKS(5);
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  for (;;) {
+    updateStatusLeds();
+    vTaskDelayUntil(&xLastWakeTime, period);
+  }
+}
+
 void setup() {
     Serial.begin(115200);
 
@@ -142,6 +156,10 @@ void setup() {
   pinMode(HTTP_LED_PIN, OUTPUT);
   digitalWrite(BLE_LED_PIN, LOW);
   digitalWrite(HTTP_LED_PIN, LOW);
+
+  // Start LED task before any blocking init so the config-mode alternate
+  // blink is visible as soon as setup() enters its slow initialisation path.
+  xTaskCreatePinnedToCore(ledTask, "led", 2048, nullptr, 1, nullptr, 1);
 
     // Check boot button FIRST, before any slow init, so the user doesn't
     // have to hold it for longer than CONFIG_BUTTON_HOLD_MS.
@@ -216,6 +234,5 @@ void loop() {
       }
       HttpBridge::processPendingKeys();
     }
-    updateStatusLeds();
     delay(10);
 }
