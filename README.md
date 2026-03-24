@@ -8,8 +8,8 @@ Current behavior:
 - Keypresses are mapped to HTTP GET paths and sent to a configured base URL.
 - Browser GUI is used for pairing, reconnect, WiFi config, URL config, and key mapping.
 - Two status LEDs are implemented:
-   - D1: keyboard connection status and key activity blink-off.
-   - D3: HTTP request activity and HTTP 200 acknowledgment.
+   - D1: keyboard connection status with keypress double blink-off.
+   - D3: WiFi connection status with HTTP 200 blink-off acknowledgment.
 
 ## Current Project Status
 
@@ -22,7 +22,7 @@ Implemented and working:
 - Auto-connect to preferred bonded keyboard in run mode.
 - HID input subscription on service 0x1812 and input report chars 0x2A22/0x2A4D.
 - HTTP key dispatch queue with repeat filtering.
-- LED signaling logic on D1 and D3.
+- LED signaling logic on D1 and D3, driven by a dedicated FreeRTOS task on Core 1.
 
 ## Hardware
 
@@ -108,18 +108,28 @@ Slash handling is normalized so duplicate/missing slash combinations are correct
 
 ## LED Behavior (Current)
 
-### D1 (BLE status)
-- ON while keyboard is connected.
-- Briefly OFF on each received keypress for visible activity blink.
-- Current blink-off duration: 180 ms.
+LED updates are handled in a dedicated 5 ms FreeRTOS task pinned to Core 1 so patterns remain stable even during blocking HTTP requests.
 
-### D3 (HTTP status)
-- OFF most of the time.
-- Short ON pulse when HTTP GET starts.
-- Longer ON pulse when HTTP status is 200.
-- Current timing:
-   - GET pulse: 90 ms.
-   - HTTP 200 pulse: 220 ms.
+### Run Mode
+
+#### D1 (BLE / keyboard)
+- OFF when keyboard is disconnected.
+- Steady ON when keyboard is connected.
+- On each keypress, performs a double blink-off pattern:
+   - 80 ms OFF, 80 ms ON, repeated 2 times.
+
+#### D3 (WiFi / HTTP result)
+- OFF when WiFi is not connected.
+- Steady ON when WiFi is connected.
+- On HTTP status 200 only, performs a single blink-off pulse:
+   - 180 ms OFF.
+- No blink on GET start.
+- No success blink for non-200 responses.
+
+### Config Mode
+
+- D1 and D3 alternate in anti-phase at 1 Hz (500 ms half-cycle).
+- This indicates the device is in configuration mode.
 
 ## Web API Endpoints
 
