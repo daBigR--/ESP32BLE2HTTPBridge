@@ -5,11 +5,11 @@ ESP32 firmware for a BLE keyboard hub with a built-in web GUI.
 Current behavior:
 - ESP32 acts as a BLE central/client for one keyboard.
 - Device supports secure pairing and stores bonds in NVS.
-- Keypresses are mapped to HTTP GET paths and sent to a configured base URL.
-- Browser GUI is used for pairing, reconnect, WiFi config, URL config, and key mapping.
+- Keypresses are mapped to HTTP GET paths and sent to the currently selected base URL.
+- Browser GUI is used for pairing, reconnect, WiFi config, multi-URL config, and key mapping.
 - Two status LEDs are implemented:
    - D1: keyboard connection status with keypress double blink-off.
-   - D3: WiFi connection status with HTTP 200 blink-off acknowledgment.
+   - D3: WiFi connection status with HTTP 200 blink-off acknowledgment and URL-selection feedback.
 
 ## Current Project Status
 
@@ -17,12 +17,13 @@ This guide reflects the current code in this repository.
 
 Implemented and working:
 - Config mode and run mode split at boot.
-- Persistent config store for WiFi networks, base URL, and key mappings.
+- Persistent config store for WiFi networks, base URLs, selected URL index, and key mappings.
 - Bonded-device aware scanner, pair/connect/unpair flows.
 - Auto-connect to preferred bonded keyboard in run mode.
 - HID input subscription on service 0x1812 and input report chars 0x2A22/0x2A4D.
 - HTTP key dispatch queue with repeat filtering.
 - LED signaling logic on D1 and D3, driven by a dedicated FreeRTOS task on Core 1.
+- Add/edit/delete flows for both base URLs and key mappings in the web UI.
 
 ## Hardware
 
@@ -59,7 +60,7 @@ platformio device monitor --baud 115200
 Mode selection happens in startup:
 
 - Config mode:
-   - Entered if boot button D9 is held high for about 800 ms during boot, or if required run config is incomplete.
+   - Entered if boot button D9 is held low for about 800 ms during boot, or if required run config is incomplete.
    - ESP32 starts SoftAP:
       - SSID: ESP32-Keyboard-Hub
       - Password: 12345678
@@ -71,9 +72,24 @@ Mode selection happens in startup:
 
 Run config is considered valid only when all are present:
 - At least one WiFi network.
-- Base URL.
+- At least one base URL.
 - At least one key mapping.
 - Preferred bonded keyboard address.
+
+## Runtime Button Behavior
+
+The D9 button is active low and uses the internal pull-up.
+
+In run mode:
+
+- Short press:
+   - Cycles to the next configured base URL.
+   - URL change takes effect immediately for subsequent HTTP GETs.
+   - D3 blinks `N` times, where `N = selectedUrlIndex + 1`.
+
+- Long press (about 800 ms):
+   - Saves the currently selected URL index to NVS.
+   - D3 performs a longer save-confirmation pulse.
 
 ## Pairing and Connection Model
 
@@ -101,7 +117,7 @@ Pairing and connecting are intentionally separate:
 5. If key has mapping and WiFi is connected, GET is sent to:
 
 ```
-<baseUrl>/<mappedPath>
+<selectedBaseUrl>/<mappedPath>
 ```
 
 Slash handling is normalized so duplicate/missing slash combinations are corrected.
@@ -123,6 +139,10 @@ LED updates are handled in a dedicated 5 ms FreeRTOS task pinned to Core 1 so pa
 - Steady ON when WiFi is connected.
 - On HTTP status 200 only, performs a single blink-off pulse:
    - 180 ms OFF.
+- On URL selection change, performs `N` blink-off/on cycles where `N = selectedUrlIndex + 1`:
+   - 150 ms OFF, 150 ms ON per cycle.
+- On URL selection save, performs a longer OFF pulse:
+   - 600 ms OFF.
 - No blink on GET start.
 - No success blink for non-200 responses.
 
@@ -143,7 +163,9 @@ BLE endpoints:
 
 Config endpoints:
 - GET /config
-- GET /config/seturl?url=<baseUrl>
+- GET /config/addurl?url=<baseUrl>
+- GET /config/editurl?idx=<index>&url=<baseUrl>
+- GET /config/delurl?idx=<index>
 - GET /config/addwifi?ssid=<ssid>&pwd=<password>
 - GET /config/delwifi?ssid=<ssid>
 - GET /config/setmapping?key=<hexWithout0x>&path=<path>
@@ -156,16 +178,18 @@ Config endpoints:
 1. Connect to AP ESP32-Keyboard-Hub in config mode.
 2. Open http://192.168.4.1.
 3. Add WiFi credentials.
-4. Set base URL.
+4. Add one or more base URLs.
 5. Scan and pair keyboard while keyboard is in pairing mode.
 6. Capture key and assign path mappings.
-7. Reboot to run mode.
+7. Edit or delete saved URLs and mappings if needed.
+8. Reboot to run mode.
 
 ## Data Persistence
 
 Stored in Preferences namespace ble_cfg:
 - WiFi networks (up to 8)
-- Base URL
+- Base URLs (up to 8)
+- Selected base URL index
 - Key mappings (up to 32)
 - BLE bonds (managed by NimBLE stack)
 
@@ -186,6 +210,7 @@ Factory reset clears saved config and BLE bonds, then reboots.
 
 - Transport uses HTTP GET only.
 - One active keyboard connection model.
+- One active base URL is used at a time, selected from the saved URL list.
 - Pairing visibility depends on keyboard advertising pairing mode (flag 0x01).
 - If WiFi is down, mapped HTTP requests are skipped and logged.
 
