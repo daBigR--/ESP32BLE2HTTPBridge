@@ -54,11 +54,6 @@
 #define HID_SERVICE_UUID      "1812"
 #define HID_INPUT_REPORT_UUID "2A4D"
 
-namespace {
-
-#define HID_SERVICE_UUID      "1812"
-#define HID_INPUT_REPORT_UUID "2A4D"
-
 // ---------------------------------------------------------------------------
 // Anonymous namespace — all symbols here are private to this translation unit
 // ---------------------------------------------------------------------------

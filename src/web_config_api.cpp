@@ -11,7 +11,9 @@
 //
 // Route summary:
 //   GET /config             — read current config as JSON
-//   GET /config/seturl      — update the HTTP base URL
+//   GET /config/addurl      — add a base URL
+//   GET /config/editurl     — edit a base URL by index
+//   GET /config/delurl      — remove a base URL by index
 //   GET /config/addwifi     — add or update a WiFi network
 //   GET /config/delwifi     — remove a WiFi network by SSID
 //   GET /config/setmapping  — add or update a key→path mapping
@@ -36,20 +38,75 @@ void registerRoutes(WebServer& server, const Context& ctx) {
   // Passwords are NOT included in the response for security — only SSIDs.
   server.on("/config", HTTP_GET, [ctx, &server]() {
     server.send(200, "application/json",
-      ConfigStore::configJson(*ctx.wifiNetworks, *ctx.baseUrl, *ctx.keyMappings));
+      ConfigStore::configJson(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex, *ctx.keyMappings));
   });
 
-  // ---- GET /config/seturl?url=<value> ------------------------------------
-  // Updates the HTTP base URL used for all outgoing GET requests.
-  // Example: /config/seturl?url=http%3A%2F%2F192.168.1.10%3A8080
-  server.on("/config/seturl", HTTP_GET, [ctx, &server]() {
+  // ---- GET /config/addurl?url=<value> ------------------------------------
+  // Appends a new base URL to the list (max 8 entries).  Existing entries
+  // are preserved.
+  server.on("/config/addurl", HTTP_GET, [ctx, &server]() {
     if (!server.hasArg("url")) {
       server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing url\"}");
       return;
     }
-    *ctx.baseUrl = server.arg("url");
-    ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrl, *ctx.keyMappings);
-    if (ctx.logFn) { ctx.logFn(String("Base URL: ") + *ctx.baseUrl); }
+    const String url = server.arg("url");
+    if (url.length() == 0) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"empty url\"}");
+      return;
+    }
+    if (ctx.baseUrls->size() >= 8) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"max 8 urls\"}");
+      return;
+    }
+    ctx.baseUrls->push_back(url);
+    ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex, *ctx.keyMappings);
+    if (ctx.logFn) { ctx.logFn(String("URL added: ") + url); }
+    server.send(200, "application/json", "{\"ok\":true}");
+  });
+
+  // ---- GET /config/editurl?idx=<n>&url=<value> ---------------------------
+  // Replaces one existing base URL in place without changing list order or
+  // the currently selected index.
+  server.on("/config/editurl", HTTP_GET, [ctx, &server]() {
+    if (!server.hasArg("idx") || !server.hasArg("url")) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing idx or url\"}");
+      return;
+    }
+    int idx = server.arg("idx").toInt();
+    if (idx < 0 || idx >= (int)ctx.baseUrls->size()) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"idx out of range\"}");
+      return;
+    }
+    const String url = server.arg("url");
+    if (url.length() == 0) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"empty url\"}");
+      return;
+    }
+    (*ctx.baseUrls)[idx] = url;
+    ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex, *ctx.keyMappings);
+    if (ctx.logFn) { ctx.logFn(String("URL updated: index ") + String(idx)); }
+    server.send(200, "application/json", "{\"ok\":true}");
+  });
+
+  // ---- GET /config/delurl?idx=<n> ----------------------------------------
+  // Removes a base URL by 0-based index.  If the selected entry is deleted,
+  // selection falls back to index 0.
+  server.on("/config/delurl", HTTP_GET, [ctx, &server]() {
+    if (!server.hasArg("idx")) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing idx\"}");
+      return;
+    }
+    int idx = server.arg("idx").toInt();
+    if (idx < 0 || idx >= (int)ctx.baseUrls->size()) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"idx out of range\"}");
+      return;
+    }
+    ctx.baseUrls->erase(ctx.baseUrls->begin() + idx);
+    if (!ctx.baseUrls->empty() && *ctx.selectedUrlIndex >= (uint8_t)ctx.baseUrls->size()) {
+      *ctx.selectedUrlIndex = 0;
+    }
+    ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex, *ctx.keyMappings);
+    if (ctx.logFn) { ctx.logFn(String("URL removed: index ") + String(idx)); }
     server.send(200, "application/json", "{\"ok\":true}");
   });
 
@@ -68,7 +125,7 @@ void registerRoutes(WebServer& server, const Context& ctx) {
     for (auto& net : *ctx.wifiNetworks) {
       if (net.ssid == ssid) {
         net.password = pwd;
-        ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrl, *ctx.keyMappings);
+        ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex, *ctx.keyMappings);
         if (ctx.logFn) { ctx.logFn(String("WiFi updated: ") + ssid); }
         server.send(200, "application/json", "{\"ok\":true}");
         return;
@@ -76,7 +133,7 @@ void registerRoutes(WebServer& server, const Context& ctx) {
     }
     // New SSID — append it.
     ctx.wifiNetworks->push_back({ssid, pwd});
-    ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrl, *ctx.keyMappings);
+    ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex, *ctx.keyMappings);
     if (ctx.logFn) { ctx.logFn(String("WiFi added: ") + ssid); }
     server.send(200, "application/json", "{\"ok\":true}");
   });
@@ -101,7 +158,7 @@ void registerRoutes(WebServer& server, const Context& ctx) {
       server.send(200, "application/json", "{\"ok\":false,\"error\":\"ssid not found\"}");
       return;
     }
-    ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrl, *ctx.keyMappings);
+    ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex, *ctx.keyMappings);
     if (ctx.logFn) { ctx.logFn(String("WiFi removed: ") + ssid); }
     server.send(200, "application/json", "{\"ok\":true}");
   });
@@ -122,14 +179,14 @@ void registerRoutes(WebServer& server, const Context& ctx) {
     for (auto& m : *ctx.keyMappings) {
       if (m.keyCode == code) {
         m.path = path;
-        ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrl, *ctx.keyMappings);
+        ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex, *ctx.keyMappings);
         server.send(200, "application/json", "{\"ok\":true}");
         return;
       }
     }
     // New key code — append it.
     ctx.keyMappings->push_back({code, path});
-    ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrl, *ctx.keyMappings);
+    ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex, *ctx.keyMappings);
     if (ctx.logFn) {
       ctx.logFn(String("Map 0x") + String(code, HEX) + String(" -> ") + path);
     }
@@ -155,7 +212,7 @@ void registerRoutes(WebServer& server, const Context& ctx) {
       server.send(200, "application/json", "{\"ok\":false,\"error\":\"key not found\"}");
       return;
     }
-    ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrl, *ctx.keyMappings);
+    ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex, *ctx.keyMappings);
     if (ctx.logFn) {
       ctx.logFn(String("Del map 0x") + String(code, HEX));
     }
@@ -179,9 +236,10 @@ void registerRoutes(WebServer& server, const Context& ctx) {
   // BLE bonds so the next pairing starts completely fresh.
   server.on("/factory-reset", HTTP_GET, [ctx, &server]() {
     ConfigStore::clearAll();       // wipe NVS namespace
-    *ctx.baseUrl = "";             // clear RAM copies too so they
+    ctx.baseUrls->clear();         // clear RAM copies too so they
     ctx.wifiNetworks->clear();     // are not accidentally re-saved
     ctx.keyMappings->clear();      // before the reboot completes
+    *ctx.selectedUrlIndex = 0;
     if (ctx.factoryResetExtrasFn) {
       ctx.factoryResetExtrasFn(); // delete BLE bonds via main.cpp hook
     }

@@ -26,7 +26,7 @@
 // ---------------
 //   CONFIG MODE — entered when:
 //       • No fully-valid run configuration has been stored yet, OR
-//       • The user holds the boot button (D9) at HIGH for ≥ 800 ms on power-on
+//       • The user holds the boot button (D9) LOW for ≥ 800 ms on power-on
 //         (allows forced reconfiguration even when a valid config is present).
 //
 //     The device brings up a WiFi SoftAP (SSID "ESP32-Keyboard-Hub") and runs
@@ -110,9 +110,11 @@ WebServer server(80);
 // Runtime configuration — loaded from NVS on boot, updated via the web UI.
 // ---------------------------------------------------------------------------
 
-// Target base URL for HTTP forwarding, e.g. "http://192.168.1.50:8080".
-// The mapped path for a key press is appended to form the final GET URL.
-static String gBaseUrl = "";
+// Target base URLs for HTTP forwarding.  HTTP GETs are always sent to
+// gBaseUrls[gSelectedUrlIndex].  The list is managed via the web UI;
+// the active selection is cycled with the physical button at runtime.
+static std::vector<String> gBaseUrls;
+static uint8_t             gSelectedUrlIndex = 0;
 
 // List of known WiFi networks (SSID + password pairs).  WiFiMulti stores all
 // of them and picks the one with the strongest signal at connect time.
@@ -137,7 +139,7 @@ static const uint8_t CONFIG_BUTTON_PIN = D9;
 // ---------------------------------------------------------------------------
 // Config-mode entry: button hold threshold
 // ---------------------------------------------------------------------------
-// The user must hold D9 HIGH for this many ms at boot to force CONFIG mode.
+// The user must hold D9 LOW for this many ms at boot to force CONFIG mode.
 // 800 ms is long enough to be intentional but short enough to be comfortable.
 static const unsigned long CONFIG_BUTTON_HOLD_MS = 800;
 
@@ -166,6 +168,18 @@ static const uint8_t       BLE_KEY_BLINK_COUNT  = 2;
 // feeling like a failure.
 static const unsigned long HTTP_200_PULSE_MS = 180;
 
+// URL-selection burst blink: N blinks on D3 where N = selectedUrlIndex + 1.
+// Each blink is URL_BLINK_OFF_MS off then URL_BLINK_ON_MS on.
+static const unsigned long URL_BLINK_OFF_MS  = 150;
+static const unsigned long URL_BLINK_ON_MS   = 150;
+static const unsigned long URL_BLINK_PERIOD  = URL_BLINK_OFF_MS + URL_BLINK_ON_MS;
+static const unsigned long URL_SAVE_PULSE_MS = 600;
+
+// Button timing for URL cycling: anything shorter than DEBOUNCE is noise;
+// anything >= LONG_PRESS triggers a save.
+static const unsigned long URL_BTN_DEBOUNCE_MS   = 50;
+static const unsigned long URL_BTN_LONG_PRESS_MS = 800;
+
 // ---------------------------------------------------------------------------
 // LED state shared between event callbacks and the LED task
 // ---------------------------------------------------------------------------
@@ -186,6 +200,14 @@ static volatile unsigned long gBleLedBlinkEndMs      = 0;
 // after which it returns to the normal WiFi-connected steady-on state.
 static volatile unsigned long gHttpLedForceOffUntilMs = 0;
 
+// D3 URL-select burst blink: gD3BurstCount blinks starting at gD3BurstStartMs.
+static volatile uint8_t       gD3BurstCount   = 0;
+static volatile unsigned long gD3BurstStartMs = 0;
+
+// Button state for runtime URL cycling (RUN mode only, accessed from loop only).
+static bool          gBtnHeld    = false;
+static unsigned long gBtnPressMs = 0;
+
 // ---------------------------------------------------------------------------
 // Forward declarations (implementations follow in this file)
 // ---------------------------------------------------------------------------
@@ -196,6 +218,9 @@ void   onBleKeyPress(uint8_t keyCode);
 void   onHttpGetStart();
 void   onHttpGetResult(int statusCode);
 void   updateStatusLeds();
+void   cycleUrl();
+void   saveSelectedUrl();
+void   handleButton();
 
 // ---------------------------------------------------------------------------
 // isConfigButtonHeldOnBoot
@@ -208,19 +233,19 @@ void   updateStatusLeds();
 //     must hold the button is exactly CONFIG_BUTTON_HOLD_MS, not longer.
 //   • Uses a polling loop rather than an interrupt because this only runs once
 //     during boot and the simplicity outweighs the marginal power cost.
-//   • Returns false immediately if the pin is already LOW (button not pressed)
+//   • Returns false immediately if the pin is already HIGH (button not pressed)
 //     so normal RUN-mode boots have essentially zero extra delay.
 bool isConfigButtonHeldOnBoot() {
-  pinMode(CONFIG_BUTTON_PIN, INPUT);
-  if (digitalRead(CONFIG_BUTTON_PIN) == HIGH) {
+  pinMode(CONFIG_BUTTON_PIN, INPUT_PULLUP);
+  if (digitalRead(CONFIG_BUTTON_PIN) == LOW) {
     unsigned long started = millis();
     while (millis() - started < CONFIG_BUTTON_HOLD_MS) {
-      if (digitalRead(CONFIG_BUTTON_PIN) == LOW) {
+      if (digitalRead(CONFIG_BUTTON_PIN) == HIGH) {
         return false; // released before the hold time elapsed — not intentional
       }
       delay(10);
     }
-    return true; // pin stayed HIGH for the full hold period — force config mode
+    return true; // pin stayed LOW for the full hold period — force config mode
   }
   return false; // button was not pressed at all
 }
@@ -244,11 +269,12 @@ String mappedPathForKey(uint8_t keyCode) {
 // currentBaseUrl
 // ---------------------------------------------------------------------------
 // Thin accessor passed as a function pointer to HttpBridge::begin().
-// Using a pointer to this function (instead of passing gBaseUrl directly)
-// means HttpBridge always reads the *current* value even if the web UI
-// updates gBaseUrl after initialisation.
+// Using a pointer to this function (instead of passing gBaseUrls directly)
+// means HttpBridge always reads the *current* value even if the web UI or
+// the button handler updates gSelectedUrlIndex after initialisation.
 String currentBaseUrl() {
-  return gBaseUrl;
+  if (gBaseUrls.empty() || gSelectedUrlIndex >= (uint8_t)gBaseUrls.size()) return "";
+  return gBaseUrls[gSelectedUrlIndex];
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +290,49 @@ String currentBaseUrl() {
 void handleFactoryResetExtras() {
     NimBLEDevice::deleteAllBonds();
     BLEKeyboard::clearPreferredBondedDevice();
+}
+
+// ---------------------------------------------------------------------------
+// cycleUrl — advance to the next base URL in the list (short button press)
+// ---------------------------------------------------------------------------
+void cycleUrl() {
+  if (gBaseUrls.empty()) return;
+  gSelectedUrlIndex = (uint8_t)((gSelectedUrlIndex + 1) % gBaseUrls.size());
+  KeyLog::add(String("URL #") + String(gSelectedUrlIndex + 1) + ": " + currentBaseUrl());
+  gD3BurstStartMs = millis();
+  gD3BurstCount   = gSelectedUrlIndex + 1;
+}
+
+// ---------------------------------------------------------------------------
+// saveSelectedUrl — persist the current URL selection to NVS (long press)
+// ---------------------------------------------------------------------------
+void saveSelectedUrl() {
+  ConfigStore::saveSelectedUrlIndex(gSelectedUrlIndex);
+  KeyLog::add(String("URL #") + String(gSelectedUrlIndex + 1) + " saved");
+  unsigned long until = millis() + URL_SAVE_PULSE_MS;
+  if (until > gHttpLedForceOffUntilMs) {
+    gHttpLedForceOffUntilMs = until;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// handleButton — poll the physical button for URL cycling in RUN mode
+// ---------------------------------------------------------------------------
+void handleButton() {
+  bool pressed = (digitalRead(CONFIG_BUTTON_PIN) == LOW);
+  unsigned long now = millis();
+  if (pressed && !gBtnHeld) {
+    gBtnHeld    = true;
+    gBtnPressMs = now;
+  } else if (!pressed && gBtnHeld) {
+    gBtnHeld = false;
+    unsigned long held = now - gBtnPressMs;
+    if (held >= URL_BTN_LONG_PRESS_MS) {
+      saveSelectedUrl();
+    } else if (held >= URL_BTN_DEBOUNCE_MS) {
+      cycleUrl();
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -371,12 +440,22 @@ void updateStatusLeds() {
     bleLedOn = phase >= BLE_KEY_BLINK_OFF_MS;  // OFF in [0, off_ms), ON in [off_ms, cycle)
   }
 
-  // --- RUN MODE: D3 — WiFi connection + HTTP-200 blink ---
+  // --- RUN MODE: D3 — WiFi connection + HTTP-200 blink + URL-select burst ---
   bool wifiConnected = WiFi.status() == WL_CONNECTED;
   bool httpLedOn = wifiConnected; // default: on iff connected
-  if (httpLedOn && now < gHttpLedForceOffUntilMs) {
-    // Inside the HTTP-200 forced-off window: extinguish D3 regardless of
-    // the connection state to produce the single blink-off pulse.
+
+  // URL-selection burst blink takes priority over the HTTP-200 pulse.
+  if (gD3BurstCount > 0) {
+    unsigned long burstEnd = gD3BurstStartMs + (unsigned long)gD3BurstCount * URL_BLINK_PERIOD;
+    if (now < burstEnd) {
+      unsigned long elapsed = now - gD3BurstStartMs;
+      unsigned long phase   = elapsed % URL_BLINK_PERIOD;
+      httpLedOn = phase >= URL_BLINK_OFF_MS;
+    } else {
+      gD3BurstCount = 0;
+    }
+  } else if (httpLedOn && now < gHttpLedForceOffUntilMs) {
+    // Inside the HTTP-200 or save-confirmation forced-off window.
     httpLedOn = false;
   }
 
@@ -496,12 +575,13 @@ void setup() {
     BLEKeyboard::begin(KeyLog::add, onBleKeyPress);
 
     // Load all persisted configuration from NVS into RAM.
-    // After this call gWifiNetworks, gBaseUrl, and gKeyMappings reflect the
+    // After this call gWifiNetworks, gBaseUrls, and gKeyMappings reflect the
     // last values saved via the web UI (or are empty/default on first boot).
-    ConfigStore::load(gWifiNetworks, gBaseUrl, gKeyMappings);
+    ConfigStore::load(gWifiNetworks, gBaseUrls, gSelectedUrlIndex, gKeyMappings);
     KeyLog::add(
       String("Config: wifi=") + String(gWifiNetworks.size()) + String(" net(s)") +
-      String(" url=") + (gBaseUrl.length() ? gBaseUrl : "(none)") +
+      String(" urls=") + String(gBaseUrls.size()) +
+      String(" sel=") + String(gSelectedUrlIndex) +
       String(" maps=") + String(gKeyMappings.size())
     );
 
@@ -514,7 +594,7 @@ void setup() {
     // needed for unattended RUN mode operation.  If any is missing, or if the
     // user explicitly requested config mode at boot, we enter CONFIG mode.
     bool runConfigReady = ConfigStore::hasValidRunConfig(
-      gWifiNetworks, gBaseUrl, gKeyMappings,
+      gWifiNetworks, gBaseUrls, gKeyMappings,
       BLEKeyboard::preferredBondedAddress()
     );
     gConfigMode = forceConfigMode || !runConfigReady;
@@ -539,7 +619,8 @@ void setup() {
       // needing access to this file's globals directly.
       WebConfigApi::Context cfgCtx = {
         &gWifiNetworks,
-        &gBaseUrl,
+        &gBaseUrls,
+        &gSelectedUrlIndex,
         &gKeyMappings,
         KeyLog::add,
         handleFactoryResetExtras
@@ -619,6 +700,9 @@ void loop() {
       // are infrequent and the BLE notification callback only queues codes,
       // never blocks.
       HttpBridge::processPendingKeys();
+
+      // Poll the physical button for URL cycling / saving.
+      handleButton();
     }
 
     // Yield to the FreeRTOS scheduler.  Without at least a 1 ms yield the

@@ -141,9 +141,9 @@ String devicesJson() {
     out += "{\"name\":\""        + JsonUtil::escape(gDevices[i].name)    + "\",";
     out += "\"address\":\""     + JsonUtil::escape(gDevices[i].address) + "\",";
     out += "\"rssi\":"          + String(gDevices[i].rssi)              + ",";
-    out += "\"bonded\":"        + (gDevices[i].bonded      ? "true" : "false") + ",";
-    out += "\"seen\":"          + (gDevices[i].seen        ? "true" : "false") + ",";
-    out += "\"pairableNow\":"   + (gDevices[i].pairableNow ? "true" : "false") + "}";
+    out += "\"bonded\":"        + String(gDevices[i].bonded      ? "true" : "false") + ",";
+    out += "\"seen\":"          + String(gDevices[i].seen        ? "true" : "false") + ",";
+    out += "\"pairableNow\":"   + String(gDevices[i].pairableNow ? "true" : "false") + "}";
   }
   out += "]";
   return out;

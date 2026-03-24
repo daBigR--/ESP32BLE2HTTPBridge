@@ -8,7 +8,9 @@
 //
 // Routes registered by registerRoutes():
 //   GET /config              — read full configuration as JSON
-//   GET /config/seturl       — set the HTTP base URL (?url=)
+//   GET /config/addurl       — add a base URL to the list (?url=)
+//   GET /config/editurl      — edit a base URL by index (?idx=&url=)
+//   GET /config/delurl       — remove a base URL by index (?idx=)
 //   GET /config/addwifi      — add or update a WiFi network (?ssid=&pwd=)
 //   GET /config/delwifi      — remove a WiFi network (?ssid=)
 //   GET /config/setmapping   — add or update a key→path mapping (?key=&path=)
@@ -34,8 +36,11 @@ struct Context {
   // Live vector of WiFi credentials in main.cpp.
   std::vector<WifiCredential>* wifiNetworks;
 
-  // Live base-URL string in main.cpp.
-  String* baseUrl;
+  // Live base-URL list in main.cpp.
+  std::vector<String>* baseUrls;
+
+  // Currently selected URL index in main.cpp.
+  uint8_t* selectedUrlIndex;
 
   // Live key-mapping vector in main.cpp.
   std::vector<KeyMapping>* keyMappings;

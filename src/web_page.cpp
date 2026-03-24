@@ -147,10 +147,13 @@ const char PAGE[] PROGMEM = R"HTML(
         </div>
       </div>
       <div class="cfg-section">
-        <label class="cfg-label">Base URL</label>
+        <label class="cfg-label">Base URLs</label>
+        <div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px">Short-press the device button to cycle URLs at runtime. Long-press (&ge;0.8&nbsp;s) to save the selection.</div>
+        <div id="baseUrlsList" style="margin-bottom:8px"></div>
         <div class="row" style="gap:8px">
-          <input type="text" id="baseUrlInput" placeholder="http://192.168.x.x:8080" style="flex:1" />
-          <button onclick="saveBaseUrl()">Save URL</button>
+          <input type="text" id="newUrlInput" placeholder="http://192.168.x.x:8080" style="flex:1" />
+          <button id="urlActionBtn" onclick="addUrl()">Add URL</button>
+          <button id="urlCancelBtn" class="alt" onclick="cancelUrlEdit()" style="display:none">Cancel</button>
         </div>
       </div>
       <div class="cfg-section">
@@ -162,6 +165,7 @@ const char PAGE[] PROGMEM = R"HTML(
         <div class="row" style="gap:8px">
           <input type="text" id="mappingPath" placeholder="/event/1" style="flex:1" />
           <button id="assignBtn" onclick="saveMapping()" disabled>Assign</button>
+          <button id="mappingCancelBtn" class="alt" onclick="cancelMappingEdit()" style="display:none">Cancel</button>
         </div>
       </div>
       <div class="cfg-section" style="margin-bottom:0">
@@ -314,12 +318,14 @@ const char PAGE[] PROGMEM = R"HTML(
     let capturing = false;
     let capturedKeyHex = '';
     let lastSeenKey = '';
+    let urlEditIndex = -1;
+    let mappingEditOriginalKey = '';
 
     async function loadConfig() {
       const r = await fetch('/config');
       const c = await r.json();
       renderWifiNetworks(c.wifiNetworks || []);
-      document.getElementById('baseUrlInput').value = c.baseUrl || '';
+      renderBaseUrls(c.baseUrls || [], c.selectedUrlIndex || 0);
       renderMappings(c.mappings || []);
     }
 
@@ -366,16 +372,72 @@ const char PAGE[] PROGMEM = R"HTML(
         `<div class="mapping-row">
           <span class="mono" style="min-width:52px">0x${m.key}</span>
           <span style="flex:1">${m.path}</span>
+          <button class="alt" style="padding:5px 10px;font-size:0.8rem" onclick="beginEditMapping('${m.key}', '${encodeURIComponent(m.path)}')">Edit</button>
           <button class="warn" style="padding:5px 10px;font-size:0.8rem" onclick="deleteMapping('${m.key}')">Delete</button>
         </div>`
       ).join('');
     }
 
-    async function saveBaseUrl() {
-      const url = document.getElementById('baseUrlInput').value.trim();
-      if (!url) { status('Enter a base URL first'); return; }
-      await fetch('/config/seturl?url=' + encodeURIComponent(url));
-      status('Base URL saved');
+    let baseUrlsList = [];
+
+    function renderBaseUrls(urls, selectedIdx) {
+      baseUrlsList = urls;
+      const el = document.getElementById('baseUrlsList');
+      if (!urls.length) {
+        el.innerHTML = '<div style="color:var(--muted);font-size:0.9rem">No URLs configured.</div>';
+        return;
+      }
+      el.innerHTML = urls.map((u, i) => {
+        const badge = (i === selectedIdx)
+          ? '<span class="pill ok" style="margin-left:6px">Active</span>'
+          : '';
+        return `<div class="mapping-row">
+          <span style="flex:1" class="mono">${u}${badge}</span>
+          <button class="alt" style="padding:5px 10px;font-size:0.8rem" onclick="beginEditUrl(${i})">Edit</button>
+          <button class="warn" style="padding:5px 10px;font-size:0.8rem" onclick="deleteUrl(${i})">Del</button>
+        </div>`;
+      }).join('');
+    }
+
+    async function addUrl() {
+      const url = document.getElementById('newUrlInput').value.trim();
+      if (!url) { status('Enter a URL first'); return; }
+      if (urlEditIndex >= 0) {
+        await fetch('/config/editurl?idx=' + urlEditIndex + '&url=' + encodeURIComponent(url));
+        status('URL updated');
+      } else {
+        await fetch('/config/addurl?url=' + encodeURIComponent(url));
+        status('URL added');
+      }
+      cancelUrlEdit();
+      await loadConfig();
+    }
+
+    function beginEditUrl(idx) {
+      if (idx < 0 || idx >= baseUrlsList.length) return;
+      urlEditIndex = idx;
+      document.getElementById('newUrlInput').value = baseUrlsList[idx];
+      document.getElementById('urlActionBtn').textContent = 'Update URL';
+      document.getElementById('urlCancelBtn').style.display = '';
+      status('Editing URL #' + (idx + 1));
+    }
+
+    function cancelUrlEdit() {
+      urlEditIndex = -1;
+      document.getElementById('newUrlInput').value = '';
+      document.getElementById('urlActionBtn').textContent = 'Add URL';
+      document.getElementById('urlCancelBtn').style.display = 'none';
+    }
+
+    async function deleteUrl(idx) {
+      await fetch('/config/delurl?idx=' + idx);
+      if (urlEditIndex === idx) {
+        cancelUrlEdit();
+      } else if (urlEditIndex > idx) {
+        urlEditIndex -= 1;
+      }
+      await loadConfig();
+      status('URL removed');
     }
 
     function startCapture() {
@@ -397,21 +459,51 @@ const char PAGE[] PROGMEM = R"HTML(
       document.getElementById('captureBtn').disabled = false;
     }
 
+    function beginEditMapping(key, encodedPath) {
+      capturing = false;
+      capturedKeyHex = key;
+      mappingEditOriginalKey = key;
+      document.getElementById('capturedKey').textContent = '0x' + key;
+      document.getElementById('mappingPath').value = decodeURIComponent(encodedPath);
+      document.getElementById('assignBtn').disabled = false;
+      document.getElementById('assignBtn').textContent = 'Update';
+      document.getElementById('mappingCancelBtn').style.display = '';
+      document.getElementById('captureBtn').textContent = 'Capture Key';
+      document.getElementById('captureBtn').disabled = false;
+      status('Editing mapping 0x' + key);
+    }
+
+    function cancelMappingEdit() {
+      capturing = false;
+      capturedKeyHex = '';
+      mappingEditOriginalKey = '';
+      document.getElementById('capturedKey').innerHTML = '&mdash;';
+      document.getElementById('mappingPath').value = '';
+      document.getElementById('assignBtn').disabled = true;
+      document.getElementById('assignBtn').textContent = 'Assign';
+      document.getElementById('mappingCancelBtn').style.display = 'none';
+      document.getElementById('captureBtn').textContent = 'Capture Key';
+      document.getElementById('captureBtn').disabled = false;
+    }
+
     async function saveMapping() {
       if (!capturedKeyHex) return;
       const path = document.getElementById('mappingPath').value.trim();
       if (!path) { status('Enter a path first'); return; }
+      if (mappingEditOriginalKey && mappingEditOriginalKey !== capturedKeyHex) {
+        await fetch('/config/delmapping?key=' + encodeURIComponent(mappingEditOriginalKey));
+      }
       await fetch('/config/setmapping?key=' + encodeURIComponent(capturedKeyHex) + '&path=' + encodeURIComponent(path));
-      status('Mapped 0x' + capturedKeyHex + ' \u2192 ' + path);
-      capturedKeyHex = '';
-      document.getElementById('capturedKey').innerHTML = '&mdash;';
-      document.getElementById('mappingPath').value = '';
-      document.getElementById('assignBtn').disabled = true;
+      status((mappingEditOriginalKey ? 'Updated ' : 'Mapped ') + '0x' + capturedKeyHex + ' \u2192 ' + path);
+      cancelMappingEdit();
       await loadConfig();
     }
 
     async function deleteMapping(key) {
       await fetch('/config/delmapping?key=' + encodeURIComponent(key));
+      if (mappingEditOriginalKey === key) {
+        cancelMappingEdit();
+      }
       await loadConfig();
     }
 

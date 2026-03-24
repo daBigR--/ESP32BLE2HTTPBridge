@@ -11,7 +11,9 @@
 // NVS namespace: "ble_cfg"
 //
 // Key naming scheme (all keys are 15 chars or fewer, NVS hard limit):
-//   "baseurl"       — the HTTP base URL for outgoing GET requests
+//   "n_urls"        — count of stored base URLs (uint8)
+//   "u<i>"          — base URL i                     (string, i = 0..n_urls-1)
+//   "selurl"        — index of the currently selected base URL (uint8)
 //   "n_nets"        — count of stored WiFi credentials (uint8)
 //   "ns<i>"         — SSID of WiFi network i        (string, i = 0..n_nets-1)
 //   "np<i>"         — password of WiFi network i    (string, i = 0..n_nets-1)
@@ -19,12 +21,18 @@
 //   "k<i>"          — key code of mapping i          (uint8, i = 0..n_maps-1)
 //   "p<i>"          — path of mapping i              (string, i = 0..n_maps-1)
 //
+// Migration from old single-URL format:
+//   Devices running a previous firmware stored exactly one URL under "baseurl".
+//   On first load after this firmware version we detect the absence of "n_urls"
+//   and silently migrate the old key to the new multi-URL format.
+//
 // The BLEKeyboard module writes additional keys in the same namespace:
 //   "bondedAddr"    — BT address of the preferred bonded keyboard
 //   "bondedName"    — display name of the preferred bonded keyboard
 //
 // Design limits:
 //   Max 8 WiFi credentials (WiFiMulti supports up to ~10; 8 is a safe budget)
+//   Max 8 base URLs
 //   Max 32 key mappings (well above any practical use case)
 // =============================================================================
 
@@ -53,37 +61,47 @@ namespace ConfigStore {
 // If the old single-network format ("wifissid"/"wifipass" keys from a previous
 // firmware version) is detected, the data is migrated automatically into the
 // multi-network format so existing devices upgrade cleanly.
+// If the old single-URL format ("baseurl" key from a previous firmware version)
+// is detected, it is migrated into baseUrls[0] automatically.
 void load(std::vector<WifiCredential>& wifiNetworks,
-          String&                     baseUrl,
-          std::vector<KeyMapping>&    keyMappings);
+          std::vector<String>&         baseUrls,
+          uint8_t&                     selectedUrlIndex,
+          std::vector<KeyMapping>&     keyMappings);
 
 // Write the current in-RAM configuration to NVS, overwriting any previous
 // values.  Called by every config-modifying HTTP route handler to ensure
 // data is persisted before acknowledging the request.
 void save(const std::vector<WifiCredential>& wifiNetworks,
-          const String&                     baseUrl,
-          const std::vector<KeyMapping>&    keyMappings);
+          const std::vector<String>&         baseUrls,
+          uint8_t                            selectedUrlIndex,
+          const std::vector<KeyMapping>&     keyMappings);
+
+// Persist only the selected URL index — lightweight NVS write called by the
+// physical button long-press handler so we avoid rewriting all config.
+void saveSelectedUrlIndex(uint8_t index);
 
 // Serialise configuration to a JSON object string:
-//   { "baseUrl": "...", "networks": [{"ssid":"..."},...],
+//   { "wifiNetworks": [{"ssid":"..."},...],
+//     "baseUrls": ["...", ...], "selectedUrlIndex": N,
 //     "mappings": [{"key":"xx","path":"..."},...] }
 // Passwords are intentionally omitted from the output.
 String configJson(
   const std::vector<WifiCredential>& wifiNetworks,
-  const String&                     baseUrl,
-  const std::vector<KeyMapping>&    keyMappings
+  const std::vector<String>&         baseUrls,
+  uint8_t                            selectedUrlIndex,
+  const std::vector<KeyMapping>&     keyMappings
 );
 
 // Returns true when all conditions required for RUN mode are satisfied:
 //   1. wifiNetworks is non-empty (at least one network to connect to).
-//   2. baseUrl is non-empty (has a destination for HTTP GETs).
+//   2. baseUrls is non-empty (has at least one destination for HTTP GETs).
 //   3. keyMappings is non-empty (at least one key configured to trigger an event).
 //   4. preferredBondedAddress is non-empty (a keyboard has been paired).
 bool hasValidRunConfig(
   const std::vector<WifiCredential>& wifiNetworks,
-  const String&                     baseUrl,
-  const std::vector<KeyMapping>&    keyMappings,
-  const String&                     preferredBondedAddress
+  const std::vector<String>&         baseUrls,
+  const std::vector<KeyMapping>&     keyMappings,
+  const String&                      preferredBondedAddress
 );
 
 // Call Preferences::clear() on the "ble_cfg" namespace, wiping every stored

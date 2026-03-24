@@ -13,7 +13,9 @@
 // other firmware components that also use Preferences.
 //
 // Key naming scheme:
-//   "baseurl"     — the HTTP base URL (String)
+//   "n_urls"      — number of stored base URLs (uint8, 0–8)
+//   "u<i>"        — base URL i (String)
+//   "selurl"      — currently selected base URL index (uint8)
 //   "n_nets"      — number of stored WiFi networks (uint8, 0–8)
 //   "ns<i>"       — SSID of network i (String)
 //   "np<i>"       — password of network i (String)
@@ -21,12 +23,12 @@
 //   "k<i>"        — HID key code for mapping i (uint8)
 //   "p<i>"        — URL path for mapping i (String)
 //
-// Migration from the old single-SSID format:
+// Migration from the old single-SSID / single-URL format:
 //   The original firmware stored exactly one WiFi network under "wifissid"
-//   and "wifipass".  On first load after the upgrade we detect the absence
-//   of "n_nets" and silently migrate the old keys to the new multi-network
-//   format.  The old keys are left in NVS (harmless) to avoid a save cycle
-//   on every boot.
+//   and "wifipass" plus one URL under "baseurl".  On first load after the
+//   upgrade we detect the absence of the new keys and silently migrate the
+//   old values.  The old keys are left in NVS (harmless) to avoid a save
+//   cycle on every boot.
 // =============================================================================
 
 #include "config_store.h"
@@ -52,9 +54,33 @@ namespace ConfigStore {
 // accidentally creating keys on every boot.  All three output parameters are
 // populated in place.  Existing content is cleared first so stale data from
 // a previous call cannot leak through.
-void load(std::vector<WifiCredential>& wifiNetworks, String& baseUrl, std::vector<KeyMapping>& keyMappings) {
+void load(std::vector<WifiCredential>& wifiNetworks,
+          std::vector<String>&         baseUrls,
+          uint8_t&                     selectedUrlIndex,
+          std::vector<KeyMapping>&     keyMappings) {
   gPrefs.begin("ble_cfg", true); // open read-only
-  baseUrl = gPrefs.getString("baseurl", "");
+
+  // Load base URLs — prefer new multi-URL format; migrate old single-URL if needed.
+  baseUrls.clear();
+  if (gPrefs.isKey("n_urls")) {
+    uint8_t nUrls = gPrefs.getUChar("n_urls", 0);
+    for (uint8_t i = 0; i < nUrls && i < 8; i++) {
+      String uk  = String("u") + String(i);
+      String url = gPrefs.getString(uk.c_str(), "");
+      if (url.length() > 0) {
+        baseUrls.push_back(url);
+      }
+    }
+  } else {
+    String oldUrl = gPrefs.getString("baseurl", "");
+    if (oldUrl.length() > 0) {
+      baseUrls.push_back(oldUrl);
+    }
+  }
+  selectedUrlIndex = gPrefs.getUChar("selurl", 0);
+  if (!baseUrls.empty() && selectedUrlIndex >= (uint8_t)baseUrls.size()) {
+    selectedUrlIndex = 0;
+  }
 
   wifiNetworks.clear();
   if (gPrefs.isKey("n_nets")) {
@@ -102,7 +128,10 @@ void load(std::vector<WifiCredential>& wifiNetworks, String& baseUrl, std::vecto
 // Opens the namespace in read-write mode ("false").  Overwrites all existing
 // keys so the stored state always matches the RAM state exactly — there is
 // no partial-update mechanism.
-void save(const std::vector<WifiCredential>& wifiNetworks, const String& baseUrl, const std::vector<KeyMapping>& keyMappings) {
+void save(const std::vector<WifiCredential>& wifiNetworks,
+          const std::vector<String>&         baseUrls,
+          uint8_t                            selectedUrlIndex,
+          const std::vector<KeyMapping>&     keyMappings) {
   gPrefs.begin("ble_cfg", false); // open read-write
   gPrefs.putUChar("n_nets", (uint8_t)wifiNetworks.size());
   for (size_t i = 0; i < wifiNetworks.size() && i < 8; i++) {
@@ -111,7 +140,12 @@ void save(const std::vector<WifiCredential>& wifiNetworks, const String& baseUrl
     gPrefs.putString(sk.c_str(), wifiNetworks[i].ssid);
     gPrefs.putString(pk.c_str(), wifiNetworks[i].password);
   }
-  gPrefs.putString("baseurl", baseUrl);
+  gPrefs.putUChar("n_urls", (uint8_t)baseUrls.size());
+  for (size_t i = 0; i < baseUrls.size() && i < 8; i++) {
+    String uk = String("u") + String(i);
+    gPrefs.putString(uk.c_str(), baseUrls[i]);
+  }
+  gPrefs.putUChar("selurl", selectedUrlIndex);
   gPrefs.putUChar("n_maps", (uint8_t)keyMappings.size());
   for (size_t i = 0; i < keyMappings.size() && i < 32; i++) {
     String kk = String("k") + String(i);
@@ -123,6 +157,15 @@ void save(const std::vector<WifiCredential>& wifiNetworks, const String& baseUrl
 }
 
 // ---------------------------------------------------------------------------
+// saveSelectedUrlIndex — persist only the selected URL index
+// ---------------------------------------------------------------------------
+void saveSelectedUrlIndex(uint8_t index) {
+  gPrefs.begin("ble_cfg", false);
+  gPrefs.putUChar("selurl", index);
+  gPrefs.end();
+}
+
+// ---------------------------------------------------------------------------
 // configJson — serialise configuration to JSON for the web UI
 // ---------------------------------------------------------------------------
 // Hand-built JSON avoids pulling in a JSON library.  JsonUtil::escape() is
@@ -130,7 +173,8 @@ void save(const std::vector<WifiCredential>& wifiNetworks, const String& baseUrl
 // quotation marks, backslashes, or control characters.
 String configJson(
   const std::vector<WifiCredential>& wifiNetworks,
-  const String& baseUrl,
+  const std::vector<String>& baseUrls,
+  uint8_t selectedUrlIndex,
   const std::vector<KeyMapping>& keyMappings
 ) {
   String out = "{\"wifiNetworks\":[";
@@ -139,7 +183,12 @@ String configJson(
     // Only include the SSID — passwords are never sent to the browser.
     out += "{\"ssid\":\"" + JsonUtil::escape(wifiNetworks[i].ssid) + "\"}";
   }
-  out += "],\"baseUrl\":\"" + JsonUtil::escape(baseUrl) + "\",\"mappings\":[";
+  out += "],\"baseUrls\":[";
+  for (size_t i = 0; i < baseUrls.size(); i++) {
+    if (i > 0) out += ",";
+    out += "\"" + JsonUtil::escape(baseUrls[i]) + "\"";
+  }
+  out += "],\"selectedUrlIndex\":" + String(selectedUrlIndex) + ",\"mappings\":[";
 
   for (size_t i = 0; i < keyMappings.size(); i++) {
     if (i > 0) { out += ","; }
@@ -163,13 +212,13 @@ String configJson(
 //   • A preferred bonded keyboard address — without this auto-connect has no target.
 bool hasValidRunConfig(
   const std::vector<WifiCredential>& wifiNetworks,
-  const String& baseUrl,
+  const std::vector<String>& baseUrls,
   const std::vector<KeyMapping>& keyMappings,
   const String& preferredBondedAddress
 ) {
-  if (wifiNetworks.empty())            return false;
-  if (baseUrl.length() == 0)           return false;
-  if (keyMappings.empty())             return false;
+  if (wifiNetworks.empty())                 return false;
+  if (baseUrls.empty())                     return false;
+  if (keyMappings.empty())                  return false;
   if (preferredBondedAddress.length() == 0) return false;
   return true;
 }
