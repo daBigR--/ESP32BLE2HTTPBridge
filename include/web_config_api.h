@@ -11,8 +11,10 @@
 //   GET /config/addurl       — add a base URL to the list (?url=)
 //   GET /config/editurl      — edit a base URL by index (?idx=&url=)
 //   GET /config/delurl       — remove a base URL by index (?idx=)
+//   GET /config/selecturl    — set active base URL by index (?idx=)
 //   GET /config/addwifi      — add or update a WiFi network (?ssid=&pwd=)
 //   GET /config/delwifi      — remove a WiFi network (?ssid=)
+//   GET /config/setsleeptimeout — set inactivity deep-sleep timeout (?ms=)
 //   GET /config/setmapping   — add or update a key→path mapping (?key=&path=)
 //   GET /config/delmapping   — remove a mapping (?key=<hex>)
 //   GET /reboot              — respond 200, then ESP.restart()
@@ -44,6 +46,9 @@ struct Context {
 
   // Live key-mapping vector in main.cpp.
   std::vector<KeyMapping>* keyMappings;
+
+  // Inactivity timeout (ms) before deep sleep in RUN mode.
+  uint32_t* sleepTimeoutMs;
 
   // Optional — if non-null, route handlers log significant events (add/remove
   // WiFi, change URL, etc.) by calling this function with a one-line string.

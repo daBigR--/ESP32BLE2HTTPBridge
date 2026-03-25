@@ -20,6 +20,7 @@
 //   "n_maps"        — count of stored key mappings  (uint8)
 //   "k<i>"          — key code of mapping i          (uint8, i = 0..n_maps-1)
 //   "p<i>"          — path of mapping i              (string, i = 0..n_maps-1)
+//   "slp_to"        — inactivity timeout for deep sleep (uint32, ms)
 //
 // Migration from old single-URL format:
 //   Devices running a previous firmware stored exactly one URL under "baseurl".
@@ -57,6 +58,12 @@ struct KeyMapping {
 
 namespace ConfigStore {
 
+// Default inactivity timeout before entering deep sleep in RUN mode.
+// Units are milliseconds.
+static const uint32_t DEFAULT_SLEEP_TIMEOUT_MS = 10UL * 60UL * 1000UL;
+static const uint32_t MIN_SLEEP_TIMEOUT_MS     = 30UL * 1000UL;
+static const uint32_t MAX_SLEEP_TIMEOUT_MS     = 24UL * 60UL * 60UL * 1000UL;
+
 // Read all stored configuration from NVS into the provided containers.
 // If the old single-network format ("wifissid"/"wifipass" keys from a previous
 // firmware version) is detected, the data is migrated automatically into the
@@ -66,7 +73,8 @@ namespace ConfigStore {
 void load(std::vector<WifiCredential>& wifiNetworks,
           std::vector<String>&         baseUrls,
           uint8_t&                     selectedUrlIndex,
-          std::vector<KeyMapping>&     keyMappings);
+          std::vector<KeyMapping>&     keyMappings,
+          uint32_t&                    sleepTimeoutMs);
 
 // Write the current in-RAM configuration to NVS, overwriting any previous
 // values.  Called by every config-modifying HTTP route handler to ensure
@@ -74,7 +82,8 @@ void load(std::vector<WifiCredential>& wifiNetworks,
 void save(const std::vector<WifiCredential>& wifiNetworks,
           const std::vector<String>&         baseUrls,
           uint8_t                            selectedUrlIndex,
-          const std::vector<KeyMapping>&     keyMappings);
+          const std::vector<KeyMapping>&     keyMappings,
+          uint32_t                           sleepTimeoutMs);
 
 // Persist only the selected URL index — lightweight NVS write called by the
 // physical button long-press handler so we avoid rewriting all config.
@@ -89,7 +98,8 @@ String configJson(
   const std::vector<WifiCredential>& wifiNetworks,
   const std::vector<String>&         baseUrls,
   uint8_t                            selectedUrlIndex,
-  const std::vector<KeyMapping>&     keyMappings
+  const std::vector<KeyMapping>&     keyMappings,
+  uint32_t                           sleepTimeoutMs
 );
 
 // Returns true when all conditions required for RUN mode are satisfied:

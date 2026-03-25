@@ -107,7 +107,7 @@ const char PAGE[] PROGMEM = R"HTML(
       .log { height: 220px; }
       li { flex-direction: column; align-items: flex-start; }
     }
-    input[type=text] { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 0.95rem; background: #f8faf9; color: var(--ink); }
+    input[type=text], input[type=number] { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 0.95rem; background: #f8faf9; color: var(--ink); }
     .cfg-label { font-weight: 700; display: block; margin-bottom: 6px; }
     .cfg-section { margin-bottom: 16px; }
     .mapping-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); }
@@ -123,10 +123,7 @@ const char PAGE[] PROGMEM = R"HTML(
         <button onclick="scan()">Scan Keyboards</button>
       </div>
       <div id="state" class="status" style="margin-top:10px">Idle</div>
-    </div>
-
-    <div class="card">
-      <h2>Discovered BLE Devices</h2>
+      <h2 style="margin-top:16px">Discovered BLE Devices</h2>
       <ul id="devices"></ul>
     </div>
 
@@ -136,25 +133,34 @@ const char PAGE[] PROGMEM = R"HTML(
     </div>
 
     <div class="card">
-      <h2>Key Mapping Configuration</h2>
+      <h2>Configuration</h2>
       <div class="cfg-section">
         <label class="cfg-label">WiFi Networks</label>
-        <div id="wifiNetworksList" style="margin-bottom:8px"></div>
         <div class="row" style="gap:8px;margin-bottom:8px">
           <input type="text" id="wifiSsidInput" placeholder="SSID" style="flex:1" />
           <input type="text" id="wifiPwdInput" placeholder="Password" style="flex:1" />
           <button onclick="addWifi()">Add</button>
         </div>
+        <div id="wifiNetworksList" style="margin-bottom:8px"></div>
       </div>
       <div class="cfg-section">
+        <label class="cfg-label">Power &amp; Sleep</label>
+        <div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px">Inactivity timeout before deep sleep (used in run mode when battery policy allows sleep).</div>
+        <div class="row" style="gap:8px">
+          <input type="number" id="sleepTimeoutMinInput" min="0.5" step="0.5" placeholder="10" style="width:140px" />
+          <span style="color:var(--muted)">minutes</span>
+          <button onclick="saveSleepTimeout()">Save Timeout</button>
+        </div>
+      </div>
+      <div class="cfg-section" style="margin-top:22px">
         <label class="cfg-label">Base URLs</label>
         <div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px">Short-press the device button to cycle URLs at runtime. Long-press (&ge;0.8&nbsp;s) to save the selection.</div>
-        <div id="baseUrlsList" style="margin-bottom:8px"></div>
-        <div class="row" style="gap:8px">
+        <div class="row" style="gap:8px;margin-bottom:8px">
           <input type="text" id="newUrlInput" placeholder="http://192.168.x.x:8080" style="flex:1" />
           <button id="urlActionBtn" onclick="addUrl()">Add URL</button>
           <button id="urlCancelBtn" class="alt" onclick="cancelUrlEdit()" style="display:none">Cancel</button>
         </div>
+        <div id="baseUrlsList" style="margin-bottom:8px"></div>
       </div>
       <div class="cfg-section">
         <label class="cfg-label">Assign a Key</label>
@@ -320,13 +326,40 @@ const char PAGE[] PROGMEM = R"HTML(
     let lastSeenKey = '';
     let urlEditIndex = -1;
     let mappingEditOriginalKey = '';
+    let currentSleepTimeoutMs = 10 * 60 * 1000;
+
+    function renderSleepTimeout(timeoutMs) {
+      const ms = Number(timeoutMs);
+      if (!Number.isFinite(ms) || ms <= 0) return;
+      currentSleepTimeoutMs = Math.round(ms);
+      document.getElementById('sleepTimeoutMinInput').value = (currentSleepTimeoutMs / 60000).toFixed(1);
+    }
 
     async function loadConfig() {
       const r = await fetch('/config');
       const c = await r.json();
       renderWifiNetworks(c.wifiNetworks || []);
       renderBaseUrls(c.baseUrls || [], c.selectedUrlIndex || 0);
+      renderSleepTimeout(c.sleepTimeoutMs || (10 * 60 * 1000));
       renderMappings(c.mappings || []);
+    }
+
+    async function saveSleepTimeout() {
+      const raw = document.getElementById('sleepTimeoutMinInput').value;
+      const minutes = parseFloat(raw);
+      if (!Number.isFinite(minutes) || minutes <= 0) {
+        status('Enter a valid timeout in minutes');
+        return;
+      }
+      const ms = Math.round(minutes * 60000);
+      const r = await fetch('/config/setsleeptimeout?ms=' + encodeURIComponent(ms));
+      const data = await r.json();
+      if (!data.ok) {
+        status(data.error || 'Failed to save timeout');
+        return;
+      }
+      renderSleepTimeout(data.sleepTimeoutMs || ms);
+      status('Sleep timeout saved');
     }
 
     let wifiNets = [];
@@ -391,12 +424,22 @@ const char PAGE[] PROGMEM = R"HTML(
         const badge = (i === selectedIdx)
           ? '<span class="pill ok" style="margin-left:6px">Active</span>'
           : '';
+        const activateBtn = (i === selectedIdx)
+          ? '<button class="alt" style="padding:5px 10px;font-size:0.8rem" disabled>Active</button>'
+          : '<button style="padding:5px 10px;font-size:0.8rem" onclick="activateUrl(' + i + ')">Activate</button>';
         return `<div class="mapping-row">
           <span style="flex:1" class="mono">${u}${badge}</span>
+          ${activateBtn}
           <button class="alt" style="padding:5px 10px;font-size:0.8rem" onclick="beginEditUrl(${i})">Edit</button>
           <button class="warn" style="padding:5px 10px;font-size:0.8rem" onclick="deleteUrl(${i})">Del</button>
         </div>`;
       }).join('');
+    }
+
+    async function activateUrl(idx) {
+      await fetch('/config/selecturl?idx=' + idx);
+      await loadConfig();
+      status('Active URL set to #' + (idx + 1));
     }
 
     async function addUrl() {

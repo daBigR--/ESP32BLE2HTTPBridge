@@ -43,6 +43,12 @@ namespace {
 // opened/closed without dynamic allocation.
 static Preferences gPrefs;
 
+uint32_t clampSleepTimeoutMs(uint32_t ms) {
+  if (ms < ConfigStore::MIN_SLEEP_TIMEOUT_MS) return ConfigStore::MIN_SLEEP_TIMEOUT_MS;
+  if (ms > ConfigStore::MAX_SLEEP_TIMEOUT_MS) return ConfigStore::MAX_SLEEP_TIMEOUT_MS;
+  return ms;
+}
+
 } // namespace
 
 namespace ConfigStore {
@@ -57,7 +63,8 @@ namespace ConfigStore {
 void load(std::vector<WifiCredential>& wifiNetworks,
           std::vector<String>&         baseUrls,
           uint8_t&                     selectedUrlIndex,
-          std::vector<KeyMapping>&     keyMappings) {
+          std::vector<KeyMapping>&     keyMappings,
+          uint32_t&                    sleepTimeoutMs) {
   gPrefs.begin("ble_cfg", true); // open read-only
 
   // Load base URLs — prefer new multi-URL format; migrate old single-URL if needed.
@@ -119,6 +126,10 @@ void load(std::vector<WifiCredential>& wifiNetworks,
       keyMappings.push_back({code, path});
     }
   }
+
+  sleepTimeoutMs = clampSleepTimeoutMs(
+    gPrefs.getUInt("slp_to", DEFAULT_SLEEP_TIMEOUT_MS)
+  );
   gPrefs.end();
 }
 
@@ -131,7 +142,8 @@ void load(std::vector<WifiCredential>& wifiNetworks,
 void save(const std::vector<WifiCredential>& wifiNetworks,
           const std::vector<String>&         baseUrls,
           uint8_t                            selectedUrlIndex,
-          const std::vector<KeyMapping>&     keyMappings) {
+          const std::vector<KeyMapping>&     keyMappings,
+          uint32_t                           sleepTimeoutMs) {
   gPrefs.begin("ble_cfg", false); // open read-write
   gPrefs.putUChar("n_nets", (uint8_t)wifiNetworks.size());
   for (size_t i = 0; i < wifiNetworks.size() && i < 8; i++) {
@@ -153,6 +165,7 @@ void save(const std::vector<WifiCredential>& wifiNetworks,
     gPrefs.putUChar(kk.c_str(), keyMappings[i].keyCode);
     gPrefs.putString(pk.c_str(), keyMappings[i].path);
   }
+  gPrefs.putUInt("slp_to", clampSleepTimeoutMs(sleepTimeoutMs));
   gPrefs.end();
 }
 
@@ -175,7 +188,8 @@ String configJson(
   const std::vector<WifiCredential>& wifiNetworks,
   const std::vector<String>& baseUrls,
   uint8_t selectedUrlIndex,
-  const std::vector<KeyMapping>& keyMappings
+  const std::vector<KeyMapping>& keyMappings,
+  uint32_t sleepTimeoutMs
 ) {
   String out = "{\"wifiNetworks\":[";
   for (size_t i = 0; i < wifiNetworks.size(); i++) {
@@ -188,7 +202,9 @@ String configJson(
     if (i > 0) out += ",";
     out += "\"" + JsonUtil::escape(baseUrls[i]) + "\"";
   }
-  out += "],\"selectedUrlIndex\":" + String(selectedUrlIndex) + ",\"mappings\":[";
+    out += "],\"selectedUrlIndex\":" + String(selectedUrlIndex) +
+      ",\"sleepTimeoutMs\":" + String(clampSleepTimeoutMs(sleepTimeoutMs)) +
+      ",\"mappings\":[";
 
   for (size_t i = 0; i < keyMappings.size(); i++) {
     if (i > 0) { out += ","; }

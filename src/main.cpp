@@ -73,6 +73,8 @@
 #include <WiFiMulti.h>      // Multi-SSID helper: stores several networks and
                             // automatically selects the strongest available one.
 #include <WebServer.h>      // Synchronous HTTP server used for the config-mode UI
+#include <esp_sleep.h>      // Deep-sleep entry and wake-source configuration
+#include <driver/rtc_io.h>  // RTC IO pull-up/down controls for sleep wake pins
 #include <algorithm>        // std::remove_if — used in web config route handlers
 
 #include <vector>           // std::vector for WiFi credentials and key mappings
@@ -132,16 +134,32 @@ static bool gConfigMode = true;
 // ---------------------------------------------------------------------------
 // Hardware pin assignments
 // ---------------------------------------------------------------------------
-// D9 is the XIAO's built-in BOOT button, conveniently doubles as a config
-// entry trigger.  D1 and D3 are onboard LEDs (active HIGH).
-static const uint8_t CONFIG_BUTTON_PIN = D9;
+// Single external button on D10 used for both boot-time force-config entry
+// and runtime actions (URL cycling + deep-sleep wake).  D1 and D3 are
+// onboard LEDs (active HIGH).
+static const uint8_t CONFIG_BUTTON_PIN = D10;
+static const uint8_t RUNTIME_BUTTON_PIN = CONFIG_BUTTON_PIN;
+
+// USB-present sense input from external divider on D7.
+// Divider expected behavior:
+//   USB present (VBUS=5V)  -> pin HIGH (~2.5V with 100k/100k)
+//   USB absent             -> pin LOW
+static const uint8_t USB_SENSE_PIN = D7;
 
 // ---------------------------------------------------------------------------
 // Config-mode entry: button hold threshold
 // ---------------------------------------------------------------------------
-// The user must hold D9 LOW for this many ms at boot to force CONFIG mode.
+// The user must hold the shared button LOW for this many ms at boot to force
+// CONFIG mode.
 // 800 ms is long enough to be intentional but short enough to be comfortable.
 static const unsigned long CONFIG_BUTTON_HOLD_MS = 800;
+
+// Sleep-entry guard: wake pin must remain released (HIGH) for this long before
+// entering deep sleep. This avoids immediate wake from line bounce/noise.
+static const unsigned long SLEEP_ENTRY_RELEASE_STABLE_MS = 80;
+
+// Deep-sleep wake source in phase-1 testing: external runtime button (active LOW).
+static const uint8_t SLEEP_WAKE_BUTTON_PIN = RUNTIME_BUTTON_PIN;
 
 // ---------------------------------------------------------------------------
 // LED pin assignments
@@ -208,6 +226,10 @@ static volatile unsigned long gD3BurstStartMs = 0;
 static bool          gBtnHeld    = false;
 static unsigned long gBtnPressMs = 0;
 
+// Deep-sleep policy state.
+static uint32_t      gSleepTimeoutMs = ConfigStore::DEFAULT_SLEEP_TIMEOUT_MS;
+static unsigned long gLastActivityMs = 0;
+
 // ---------------------------------------------------------------------------
 // Forward declarations (implementations follow in this file)
 // ---------------------------------------------------------------------------
@@ -221,6 +243,12 @@ void   updateStatusLeds();
 void   cycleUrl();
 void   saveSelectedUrl();
 void   handleButton();
+void   markUserActivity();
+bool   isRunningOnBattery();
+void   maybeEnterDeepSleep();
+void   enterDeepSleep();
+const char* wakeupCauseToText(esp_sleep_wakeup_cause_t cause);
+const char* powerSourceToText();
 
 // ---------------------------------------------------------------------------
 // isConfigButtonHeldOnBoot
@@ -297,6 +325,7 @@ void handleFactoryResetExtras() {
 // ---------------------------------------------------------------------------
 void cycleUrl() {
   if (gBaseUrls.empty()) return;
+  markUserActivity();
   gSelectedUrlIndex = (uint8_t)((gSelectedUrlIndex + 1) % gBaseUrls.size());
   KeyLog::add(String("URL #") + String(gSelectedUrlIndex + 1) + ": " + currentBaseUrl());
   gD3BurstStartMs = millis();
@@ -307,6 +336,7 @@ void cycleUrl() {
 // saveSelectedUrl — persist the current URL selection to NVS (long press)
 // ---------------------------------------------------------------------------
 void saveSelectedUrl() {
+  markUserActivity();
   ConfigStore::saveSelectedUrlIndex(gSelectedUrlIndex);
   KeyLog::add(String("URL #") + String(gSelectedUrlIndex + 1) + " saved");
   unsigned long until = millis() + URL_SAVE_PULSE_MS;
@@ -319,7 +349,7 @@ void saveSelectedUrl() {
 // handleButton — poll the physical button for URL cycling in RUN mode
 // ---------------------------------------------------------------------------
 void handleButton() {
-  bool pressed = (digitalRead(CONFIG_BUTTON_PIN) == LOW);
+  bool pressed = (digitalRead(RUNTIME_BUTTON_PIN) == LOW);
   unsigned long now = millis();
   if (pressed && !gBtnHeld) {
     gBtnHeld    = true;
@@ -352,6 +382,7 @@ void handleButton() {
 //      happens in processPendingKeys() on the next loop() iteration, keeping
 //      the BLE callback fast and non-blocking.
 void onBleKeyPress(uint8_t keyCode) {
+  markUserActivity();
   // Record blink window; the LED task will drive the pin.
   unsigned long now = millis();
   gBleLedBlinkStartMs = now;
@@ -500,8 +531,111 @@ static void ledTask(void* /*pvParameters*/) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// markUserActivity — update inactivity timer baseline
+// ---------------------------------------------------------------------------
+void markUserActivity() {
+  gLastActivityMs = millis();
+}
+
+// ---------------------------------------------------------------------------
+// isRunningOnBattery — true when USB 5V is not detected on D7
+// ---------------------------------------------------------------------------
+bool isRunningOnBattery() {
+  return digitalRead(USB_SENSE_PIN) == LOW;
+}
+
+// ---------------------------------------------------------------------------
+// powerSourceToText — readable power-source label
+// ---------------------------------------------------------------------------
+const char* powerSourceToText() {
+  return isRunningOnBattery() ? "BATTERY" : "USB";
+}
+
+// ---------------------------------------------------------------------------
+// wakeupCauseToText — readable label for boot logs
+// ---------------------------------------------------------------------------
+const char* wakeupCauseToText(esp_sleep_wakeup_cause_t cause) {
+  switch (cause) {
+    case ESP_SLEEP_WAKEUP_UNDEFINED: return "UNDEFINED (cold boot/reset)";
+    case ESP_SLEEP_WAKEUP_EXT0:      return "EXT0";
+    case ESP_SLEEP_WAKEUP_EXT1:      return "EXT1";
+    case ESP_SLEEP_WAKEUP_TIMER:     return "TIMER";
+    case ESP_SLEEP_WAKEUP_TOUCHPAD:  return "TOUCHPAD";
+    case ESP_SLEEP_WAKEUP_ULP:       return "ULP";
+    case ESP_SLEEP_WAKEUP_GPIO:      return "GPIO";
+    case ESP_SLEEP_WAKEUP_UART:      return "UART";
+    default:                         return "OTHER";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// enterDeepSleep — configure wake source and start deep sleep
+// ---------------------------------------------------------------------------
+void enterDeepSleep() {
+  // Guard: only sleep when wake button is released and stable HIGH.
+  unsigned long stableStart = millis();
+  while (millis() - stableStart < SLEEP_ENTRY_RELEASE_STABLE_MS) {
+    if (digitalRead(SLEEP_WAKE_BUTTON_PIN) == LOW) {
+      markUserActivity();
+      return;
+    }
+    delay(2);
+  }
+
+  KeyLog::add(String("Entering deep sleep after ") + String(gSleepTimeoutMs) + String(" ms inactivity"));
+  BLEKeyboard::disconnectKeyboard();
+
+  // Keep wake pin biased HIGH in deep sleep to avoid floating-trigger wake.
+  rtc_gpio_pullup_en((gpio_num_t)SLEEP_WAKE_BUTTON_PIN);
+  rtc_gpio_pulldown_dis((gpio_num_t)SLEEP_WAKE_BUTTON_PIN);
+
+  // Wake when the button pin is pulled LOW (button press).
+  if (!esp_sleep_is_valid_wakeup_gpio((gpio_num_t)SLEEP_WAKE_BUTTON_PIN)) {
+    KeyLog::add(String("Sleep aborted: wake GPIO invalid for deep sleep: ") + String(SLEEP_WAKE_BUTTON_PIN));
+    markUserActivity();
+    return;
+  }
+  esp_err_t wakeCfg = esp_sleep_enable_ext0_wakeup((gpio_num_t)SLEEP_WAKE_BUTTON_PIN, 0);
+  if (wakeCfg != ESP_OK) {
+    KeyLog::add(String("Sleep aborted: ext0 cfg failed err=") + String((int)wakeCfg));
+    markUserActivity();
+    return;
+  }
+
+  delay(50);
+  Serial.flush();
+  esp_deep_sleep_start();
+}
+
+// ---------------------------------------------------------------------------
+// maybeEnterDeepSleep — RUN-mode inactivity sleep gate
+// ---------------------------------------------------------------------------
+void maybeEnterDeepSleep() {
+  if (gConfigMode) return;
+  if (!isRunningOnBattery()) return;
+  if (gSleepTimeoutMs < ConfigStore::MIN_SLEEP_TIMEOUT_MS) return;
+
+  unsigned long now = millis();
+  if (now - gLastActivityMs >= gSleepTimeoutMs) {
+    enterDeepSleep();
+  }
+}
+
 void setup() {
     Serial.begin(115200);
+
+  esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
+  Serial.print("Wake cause: ");
+  Serial.println(wakeupCauseToText(wakeCause));
+
+  // Runtime button on D10: active LOW with internal pull-up.
+  pinMode(RUNTIME_BUTTON_PIN, INPUT_PULLUP);
+
+  // USB presence detector on D7 from external divider.
+  pinMode(USB_SENSE_PIN, INPUT);
+  Serial.print("Power source (early): ");
+  Serial.println(powerSourceToText());
 
   // Initialise LED pins as outputs and start them LOW (off).
   // This ensures a defined visual state before the LED task starts.
@@ -532,6 +666,10 @@ void setup() {
 
     // Brief pause to let the serial monitor connect before the first output.
     delay(800);
+
+    Serial.print("Power source: ");
+    Serial.println(powerSourceToText());
+    KeyLog::add(String("Power source: ") + powerSourceToText());
 
     // --- NimBLE stack initialisation ---
     // "ESP32-KB-Receiver" is the device name advertised over BLE.  It is
@@ -577,12 +715,13 @@ void setup() {
     // Load all persisted configuration from NVS into RAM.
     // After this call gWifiNetworks, gBaseUrls, and gKeyMappings reflect the
     // last values saved via the web UI (or are empty/default on first boot).
-    ConfigStore::load(gWifiNetworks, gBaseUrls, gSelectedUrlIndex, gKeyMappings);
+    ConfigStore::load(gWifiNetworks, gBaseUrls, gSelectedUrlIndex, gKeyMappings, gSleepTimeoutMs);
     KeyLog::add(
       String("Config: wifi=") + String(gWifiNetworks.size()) + String(" net(s)") +
       String(" urls=") + String(gBaseUrls.size()) +
       String(" sel=") + String(gSelectedUrlIndex) +
-      String(" maps=") + String(gKeyMappings.size())
+      String(" maps=") + String(gKeyMappings.size()) +
+      String(" sleepMs=") + String(gSleepTimeoutMs)
     );
 
     // Refresh the preferred bonded device address from NimBLE's bond store.
@@ -622,6 +761,7 @@ void setup() {
         &gBaseUrls,
         &gSelectedUrlIndex,
         &gKeyMappings,
+        &gSleepTimeoutMs,
         KeyLog::add,
         handleFactoryResetExtras
       };
@@ -630,9 +770,12 @@ void setup() {
       server.begin();
 
       Serial.println("\nESP32 BLE Keyboard Hub - CONFIG mode");
+      Serial.print("Power source: ");
+      Serial.println(powerSourceToText());
       Serial.print("Open GUI at: http://");
       Serial.println(WiFi.softAPIP()); // typically 192.168.4.1
       KeyLog::add("GUI ready");
+      KeyLog::add(String("Power source: ") + powerSourceToText());
     } else {
       // ---- RUN MODE setup ----
 
@@ -652,10 +795,15 @@ void setup() {
       gWifiMulti.run(10000);
 
       Serial.println("\nESP32 BLE Keyboard Hub - RUN mode");
+      Serial.print("Power source: ");
+      Serial.println(powerSourceToText());
       KeyLog::add(String("RUN mode: ") + String(gWifiNetworks.size()) + " WiFi network(s) configured");
       KeyLog::add("RUN mode: waiting for keyboard and mapped keypresses");
+      KeyLog::add(String("Power source: ") + powerSourceToText());
       // BLE auto-connect starts from loop() via maybeAutoConnectBondedKeyboard().
     }
+
+    markUserActivity();
 }
 
 // ---------------------------------------------------------------------------
@@ -703,6 +851,9 @@ void loop() {
 
       // Poll the physical button for URL cycling / saving.
       handleButton();
+
+      // Enter deep sleep after prolonged inactivity in battery mode.
+      maybeEnterDeepSleep();
     }
 
     // Yield to the FreeRTOS scheduler.  Without at least a 1 ms yield the
