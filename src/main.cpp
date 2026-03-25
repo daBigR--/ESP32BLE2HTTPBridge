@@ -193,10 +193,13 @@ static const unsigned long URL_BLINK_ON_MS   = 150;
 static const unsigned long URL_BLINK_PERIOD  = URL_BLINK_OFF_MS + URL_BLINK_ON_MS;
 static const unsigned long URL_SAVE_PULSE_MS = 600;
 
-// Button timing for URL cycling: anything shorter than DEBOUNCE is noise;
-// anything >= LONG_PRESS triggers a save.
-static const unsigned long URL_BTN_DEBOUNCE_MS   = 50;
-static const unsigned long URL_BTN_LONG_PRESS_MS = 800;
+// Button timing for URL cycling / save / sleep:
+//   DEBOUNCE   — minimum hold to filter electrical noise
+//   LONG_PRESS — hold duration that triggers deep-sleep entry
+//   DOUBLE_WIN — maximum gap between two short presses to count as double-press
+static const unsigned long URL_BTN_DEBOUNCE_MS      = 50;
+static const unsigned long URL_BTN_LONG_PRESS_MS    = 800;
+static const unsigned long URL_BTN_DOUBLE_WINDOW_MS = 400;
 
 // ---------------------------------------------------------------------------
 // LED state shared between event callbacks and the LED task
@@ -222,9 +225,15 @@ static volatile unsigned long gHttpLedForceOffUntilMs = 0;
 static volatile uint8_t       gD3BurstCount   = 0;
 static volatile unsigned long gD3BurstStartMs = 0;
 
-// Button state for runtime URL cycling (RUN mode only, accessed from loop only).
-static bool          gBtnHeld    = false;
-static unsigned long gBtnPressMs = 0;
+// Button state machine for runtime URL cycling / save / sleep (RUN mode only).
+// BTN_IDLE            — waiting for the first press
+// BTN_PRESSED         — button currently held; timing the hold duration
+// BTN_WAIT_DOUBLE     — first press released; waiting for possible second press
+// BTN_WAIT_SECOND_RELEASE — second press confirmed; waiting for its release
+enum BtnState { BTN_IDLE, BTN_PRESSED, BTN_WAIT_DOUBLE, BTN_WAIT_SECOND_RELEASE };
+static BtnState      gBtnState     = BTN_IDLE;
+static unsigned long gBtnPressMs   = 0;
+static unsigned long gBtnReleaseMs = 0;
 
 // Deep-sleep policy state.
 static uint32_t      gSleepTimeoutMs = ConfigStore::DEFAULT_SLEEP_TIMEOUT_MS;
@@ -348,20 +357,59 @@ void saveSelectedUrl() {
 // ---------------------------------------------------------------------------
 // handleButton — poll the physical button for URL cycling in RUN mode
 // ---------------------------------------------------------------------------
+// Button protocol in RUN mode:
+//   Short press  — cycle to the next base URL (cycleUrl)
+//   Double press — save the current URL selection to NVS (saveSelectedUrl)
+//   Long press   — enter deep sleep regardless of power source (enterDeepSleep)
+// Single vs. double discrimination: after a valid short release, wait up to
+// URL_BTN_DOUBLE_WINDOW_MS for a second press.  If it arrives → double press.
+// If the window expires first → single press.  This means single-press actions
+// are delayed by up to DOUBLE_WIN ms, which is imperceptible in practice.
 void handleButton() {
   bool pressed = (digitalRead(RUNTIME_BUTTON_PIN) == LOW);
   unsigned long now = millis();
-  if (pressed && !gBtnHeld) {
-    gBtnHeld    = true;
-    gBtnPressMs = now;
-  } else if (!pressed && gBtnHeld) {
-    gBtnHeld = false;
-    unsigned long held = now - gBtnPressMs;
-    if (held >= URL_BTN_LONG_PRESS_MS) {
-      saveSelectedUrl();
-    } else if (held >= URL_BTN_DEBOUNCE_MS) {
-      cycleUrl();
-    }
+
+  switch (gBtnState) {
+    case BTN_IDLE:
+      if (pressed) {
+        markUserActivity();           // prevent inactivity timeout during hold
+        gBtnState   = BTN_PRESSED;
+        gBtnPressMs = now;
+      }
+      break;
+
+    case BTN_PRESSED:
+      if (!pressed) {
+        unsigned long held = now - gBtnPressMs;
+        if (held >= URL_BTN_LONG_PRESS_MS) {
+          enterDeepSleep();           // button already released — guard will pass
+          gBtnState = BTN_IDLE;
+        } else if (held >= URL_BTN_DEBOUNCE_MS) {
+          gBtnReleaseMs = now;        // start double-press window
+          gBtnState     = BTN_WAIT_DOUBLE;
+        } else {
+          gBtnState = BTN_IDLE;       // too short — electrical noise, ignore
+        }
+      }
+      break;
+
+    case BTN_WAIT_DOUBLE:
+      if (pressed) {
+        // Second press arrived within the window — confirmed double press
+        saveSelectedUrl();
+        gBtnState = BTN_WAIT_SECOND_RELEASE;
+      } else if (now - gBtnReleaseMs >= URL_BTN_DOUBLE_WINDOW_MS) {
+        // Window expired with no second press — confirmed single press
+        cycleUrl();
+        gBtnState = BTN_IDLE;
+      }
+      break;
+
+    case BTN_WAIT_SECOND_RELEASE:
+      if (!pressed) {
+        gBtnState = BTN_IDLE;
+      }
+      break;
   }
 }
 
