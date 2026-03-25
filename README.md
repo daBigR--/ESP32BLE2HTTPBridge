@@ -87,9 +87,18 @@ In run mode:
    - URL change takes effect immediately for subsequent HTTP GETs.
    - D3 blinks `N` times, where `N = selectedUrlIndex + 1`.
 
-- Long press (about 800 ms):
+- Double press:
    - Saves the currently selected URL index to NVS.
    - D3 performs a longer save-confirmation pulse.
+
+- Long press (about 800 ms):
+   - Puts the device into deep sleep regardless of power source.
+
+- While sleeping:
+   - Pressing the button wakes the device back into normal startup flow.
+
+- Battery-only inactivity timeout:
+   - Still sends the device to deep sleep automatically after the configured timeout.
 
 ## Pairing and Connection Model
 
@@ -141,7 +150,7 @@ LED updates are handled in a dedicated 5 ms FreeRTOS task pinned to Core 1 so pa
    - 180 ms OFF.
 - On URL selection change, performs `N` blink-off/on cycles where `N = selectedUrlIndex + 1`:
    - 150 ms OFF, 150 ms ON per cycle.
-- On URL selection save, performs a longer OFF pulse:
+- On URL selection save via double press, performs a longer OFF pulse:
    - 600 ms OFF.
 - No blink on GET start.
 - No success blink for non-200 responses.

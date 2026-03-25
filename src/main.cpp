@@ -342,7 +342,7 @@ void cycleUrl() {
 }
 
 // ---------------------------------------------------------------------------
-// saveSelectedUrl — persist the current URL selection to NVS (long press)
+// saveSelectedUrl — persist the current URL selection to NVS (double press)
 // ---------------------------------------------------------------------------
 void saveSelectedUrl() {
   markUserActivity();
