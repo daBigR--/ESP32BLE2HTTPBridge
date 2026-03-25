@@ -258,6 +258,13 @@ void   maybeEnterDeepSleep();
 void   enterDeepSleep();
 const char* wakeupCauseToText(esp_sleep_wakeup_cause_t cause);
 const char* powerSourceToText();
+void   initPinsAndLedTask();
+void   initBleAndHttpStack();
+void   loadPersistedConfig();
+bool   determineConfigMode(bool forceConfigMode);
+void   startConfigModeServer();
+void   startRunModeWiFi();
+void   startSelectedMode();
 
 // ---------------------------------------------------------------------------
 // isConfigButtonHeldOnBoot
@@ -670,33 +677,25 @@ void maybeEnterDeepSleep() {
   }
 }
 
-void setup() {
-    Serial.begin(115200);
-
-  esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
-  Serial.print("Wake cause: ");
-  Serial.println(wakeupCauseToText(wakeCause));
-
-  // Runtime button on D10: active LOW with internal pull-up.
+// ---------------------------------------------------------------------------
+// initPinsAndLedTask — configure I/O and start dedicated LED task
+// ---------------------------------------------------------------------------
+void initPinsAndLedTask() {
+  // Runtime/config button (active LOW).
   pinMode(RUNTIME_BUTTON_PIN, INPUT_PULLUP);
 
-  // USB presence detector on D7 from external divider.
+  // USB presence detector (HIGH=USB, LOW=battery).
   pinMode(USB_SENSE_PIN, INPUT);
   Serial.print("Power source (early): ");
   Serial.println(powerSourceToText());
 
-  // Initialise LED pins as outputs and start them LOW (off).
-  // This ensures a defined visual state before the LED task starts.
+  // Ensure a defined LED state before the task starts.
   pinMode(BLE_LED_PIN,  OUTPUT);
   pinMode(HTTP_LED_PIN, OUTPUT);
   digitalWrite(BLE_LED_PIN,  LOW);
   digitalWrite(HTTP_LED_PIN, LOW);
 
-  // Start the LED task before any other (slow) initialisation so that the
-  // config-mode alternating blink becomes visible immediately while NimBLE,
-  // WiFi, and NVS are being initialised below.  By the time setup() finishes
-  // gConfigMode is set to its final value, and the LED task picks it up
-  // on the next 5 ms tick without any additional signalling needed.
+  // Start LED task early so status feedback is live during boot.
   xTaskCreatePinnedToCore(
     ledTask,    // task function
     "led",      // human-readable task name (shown in FreeRTOS debug tools)
@@ -706,152 +705,167 @@ void setup() {
     nullptr,    // task handle (we don't need to control it later)
     1           // CPU core (1 = APP_CPU, away from BLE/WiFi on PRO_CPU)
   );
+}
 
-    // Read the boot button BEFORE anything else so that the user only needs
-    // to hold it for CONFIG_BUTTON_HOLD_MS.  Everything below is slow and
-    // would otherwise inflate the required hold time unpredictably.
-    bool forceConfigMode = isConfigButtonHeldOnBoot();
+// ---------------------------------------------------------------------------
+// initBleAndHttpStack — initialise BLE stack and HTTP bridge plumbing
+// ---------------------------------------------------------------------------
+void initBleAndHttpStack() {
+  // NimBLE stack initialisation.
+  NimBLEDevice::init("ESP32-KB-Receiver");
 
-    // Brief pause to let the serial monitor connect before the first output.
-    delay(800);
+  // Strong TX power for more robust keyboard links.
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9, ESP_BLE_PWR_TYPE_DEFAULT);
 
-    Serial.print("Power source: ");
-    Serial.println(powerSourceToText());
-    KeyLog::add(String("Power source: ") + powerSourceToText());
+  // Bonding + secure connections, with keyboard-friendly IO settings.
+  NimBLEDevice::setSecurityAuth(true, false, true);
 
-    // --- NimBLE stack initialisation ---
-    // "ESP32-KB-Receiver" is the device name advertised over BLE.  It is
-    // only visible while scanning; as a central we rarely advertise.
-    NimBLEDevice::init("ESP32-KB-Receiver");
+  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
 
-    // Maximum TX power.  A stronger signal helps maintain the BLE connection
-    // across a room and speeds up the initial scan-and-connect phase.
-    NimBLEDevice::setPower(ESP_PWR_LVL_P9, ESP_BLE_PWR_TYPE_DEFAULT);
+  NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
+  NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
 
-    // Security mode: bonding enabled (true), MITM NOT required (false),
-    // SC (Secure Connections / BLE 4.2 LE Secure Connections) enabled (true).
-    // MITM is skipped because keyboards typically have no display or keypad,
-    // so numeric comparison or passkey entry is impractical.
-    NimBLEDevice::setSecurityAuth(true, false, true);
+  // Wire up HTTP bridge callbacks.
+  HttpBridge::begin(KeyLog::add, currentBaseUrl, mappedPathForKey);
 
-    // IO capability: no input, no output.  Combined with MITM=false this
-    // selects the "Just Works" pairing model, which auto-accepts the bond
-    // without requiring user interaction on either side.
-    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
+  // Register HTTP result hooks for LED signaling.
+  HttpBridge::setGetCallbacks(onHttpGetStart, onHttpGetResult);
 
-    // Key distribution during pairing: distribute encryption key (LTK) and
-    // identity (IRK) in both directions.  The LTK allows re-encryption of
-    // future connections without re-pairing; the IRK allows resolution of
-    // private (random) BLE addresses used by the keyboard.
-    NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
-    NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
+  // Start keyboard module and keypress callback chain.
+  BLEKeyboard::begin(KeyLog::add, onBleKeyPress);
+}
 
-    // Wire up HttpBridge with function pointers:
-    //   KeyLog::add       — log function for HTTP event messages
-    //   currentBaseUrl    — called at dispatch time to get the latest base URL
-    //   mappedPathForKey  — translates a key code to a relative path
-    HttpBridge::begin(KeyLog::add, currentBaseUrl, mappedPathForKey);
+// ---------------------------------------------------------------------------
+// loadPersistedConfig — load NVS config into RAM and log summary
+// ---------------------------------------------------------------------------
+void loadPersistedConfig() {
+  // Load persisted config from NVS into runtime state.
+  ConfigStore::load(gWifiNetworks, gBaseUrls, gSelectedUrlIndex, gKeyMappings, gSleepTimeoutMs);
+  KeyLog::add(
+    String("Config: wifi=") + String(gWifiNetworks.size()) + String(" net(s)") +
+    String(" urls=") + String(gBaseUrls.size()) +
+    String(" sel=") + String(gSelectedUrlIndex) +
+    String(" maps=") + String(gKeyMappings.size()) +
+    String(" sleepMs=") + String(gSleepTimeoutMs)
+  );
 
-    // Register LED notification callbacks so HttpBridge can signal the LED
-    // state machine when a GET starts and when the result arrives.
-    HttpBridge::setGetCallbacks(onHttpGetStart, onHttpGetResult);
+  // Refresh preferred bonded keyboard used by auto-connect.
+  BLEKeyboard::refreshPreferredBondedDevice();
+}
 
-    // Start the BLE keyboard module, passing the log function and the key-press
-    // callback that will enqueue the key code in HttpBridge and arm the D1 blink.
-    BLEKeyboard::begin(KeyLog::add, onBleKeyPress);
+// ---------------------------------------------------------------------------
+// determineConfigMode — decide config vs run mode from boot + persisted state
+// ---------------------------------------------------------------------------
+bool determineConfigMode(bool forceConfigMode) {
+  // RUN mode is allowed only with complete persisted configuration.
+  bool runConfigReady = ConfigStore::hasValidRunConfig(
+    gWifiNetworks,
+    gBaseUrls,
+    gKeyMappings,
+    BLEKeyboard::preferredBondedAddress()
+  );
+  return forceConfigMode || !runConfigReady;
+}
 
-    // Load all persisted configuration from NVS into RAM.
-    // After this call gWifiNetworks, gBaseUrls, and gKeyMappings reflect the
-    // last values saved via the web UI (or are empty/default on first boot).
-    ConfigStore::load(gWifiNetworks, gBaseUrls, gSelectedUrlIndex, gKeyMappings, gSleepTimeoutMs);
-    KeyLog::add(
-      String("Config: wifi=") + String(gWifiNetworks.size()) + String(" net(s)") +
-      String(" urls=") + String(gBaseUrls.size()) +
-      String(" sel=") + String(gSelectedUrlIndex) +
-      String(" maps=") + String(gKeyMappings.size()) +
-      String(" sleepMs=") + String(gSleepTimeoutMs)
-    );
+// ---------------------------------------------------------------------------
+// startConfigModeServer — start AP + HTTP server routes for config mode
+// ---------------------------------------------------------------------------
+void startConfigModeServer() {
+  // Start config AP.
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID, AP_PASSWORD);
 
-    // Refresh the preferred bonded device address from NimBLE's bond store.
-    // This picks the first (or previously chosen) bonded address so auto-
-    // connect can start without the user having to go through the web UI again.
-    BLEKeyboard::refreshPreferredBondedDevice();
+  // Serve the embedded web app.
+  server.on("/", HTTP_GET, []() { server.send(200, "text/html", PAGE); });
 
-    // Determine operating mode.  hasValidRunConfig() checks all four conditions
-    // needed for unattended RUN mode operation.  If any is missing, or if the
-    // user explicitly requested config mode at boot, we enter CONFIG mode.
-    bool runConfigReady = ConfigStore::hasValidRunConfig(
-      gWifiNetworks, gBaseUrls, gKeyMappings,
-      BLEKeyboard::preferredBondedAddress()
-    );
-    gConfigMode = forceConfigMode || !runConfigReady;
+  // Register BLE and config APIs.
+  WebBleApi::registerRoutes(server);
 
-    if (gConfigMode) {
-      // ---- CONFIG MODE setup ----
+  WebConfigApi::Context cfgCtx = {
+    &gWifiNetworks,
+    &gBaseUrls,
+    &gSelectedUrlIndex,
+    &gKeyMappings,
+    &gSleepTimeoutMs,
+    KeyLog::add,
+    handleFactoryResetExtras
+  };
+  WebConfigApi::registerRoutes(server, cfgCtx);
+  server.begin();
 
-      // Start the ESP32 as a WiFi SoftAP.  WIFI_AP mode runs only the AP
-      // interface; no station connection is attempted.
-      WiFi.mode(WIFI_AP);
-      WiFi.softAP(AP_SSID, AP_PASSWORD);
+  Serial.println("\nESP32 BLE Keyboard Hub - CONFIG mode");
+  Serial.print("Power source: ");
+  Serial.println(powerSourceToText());
+  Serial.print("Open GUI at: http://");
+  Serial.println(WiFi.softAPIP()); // typically 192.168.4.1
+  KeyLog::add("GUI ready");
+  KeyLog::add(String("Power source: ") + powerSourceToText());
+}
 
-      // Serve the bundled single-page web app at the root URL.
-      // PAGE is a large const char[] defined in web_page.h.
-      server.on("/", HTTP_GET, []() { server.send(200, "text/html", PAGE); });
+// ---------------------------------------------------------------------------
+// startRunModeWiFi — configure STA mode and initial WiFi connection
+// ---------------------------------------------------------------------------
+void startRunModeWiFi() {
+  // Start station mode and register saved APs.
+  WiFi.mode(WIFI_STA);
 
-      // Register all BLE management REST endpoints (scan, pair, connect, …).
-      WebBleApi::registerRoutes(server);
+  for (const auto& net : gWifiNetworks) {
+    gWifiMulti.addAP(net.ssid.c_str(), net.password.c_str());
+  }
 
-      // Build the config API context — bundles pointers to all mutable
-      // state plus callback hooks so WebConfigApi can modify config without
-      // needing access to this file's globals directly.
-      WebConfigApi::Context cfgCtx = {
-        &gWifiNetworks,
-        &gBaseUrls,
-        &gSelectedUrlIndex,
-        &gKeyMappings,
-        &gSleepTimeoutMs,
-        KeyLog::add,
-        handleFactoryResetExtras
-      };
-      // Register all configuration REST endpoints (WiFi, URL, mappings, reset).
-      WebConfigApi::registerRoutes(server, cfgCtx);
-      server.begin();
+  // Initial connect attempt; loop() handles retries.
+  gWifiMulti.run(10000);
 
-      Serial.println("\nESP32 BLE Keyboard Hub - CONFIG mode");
-      Serial.print("Power source: ");
-      Serial.println(powerSourceToText());
-      Serial.print("Open GUI at: http://");
-      Serial.println(WiFi.softAPIP()); // typically 192.168.4.1
-      KeyLog::add("GUI ready");
-      KeyLog::add(String("Power source: ") + powerSourceToText());
-    } else {
-      // ---- RUN MODE setup ----
+  Serial.println("\nESP32 BLE Keyboard Hub - RUN mode");
+  Serial.print("Power source: ");
+  Serial.println(powerSourceToText());
+  KeyLog::add(String("RUN mode: ") + String(gWifiNetworks.size()) + " WiFi network(s) configured");
+  KeyLog::add("RUN mode: waiting for keyboard and mapped keypresses");
+  KeyLog::add(String("Power source: ") + powerSourceToText());
+  // BLE auto-connect starts from loop().
+}
 
-      // Switch to station (STA) mode so we can join an existing WiFi network.
-      WiFi.mode(WIFI_STA);
+// ---------------------------------------------------------------------------
+// startSelectedMode — dispatch to config/run startup based on gConfigMode
+// ---------------------------------------------------------------------------
+void startSelectedMode() {
+  if (gConfigMode) {
+    startConfigModeServer();
+  } else {
+    startRunModeWiFi();
+  }
+}
 
-      // Register all stored networks with WiFiMulti.  In the main loop,
-      // WiFiMulti::run() will scan and connect to whichever of these SSIDs
-      // has the strongest signal.
-      for (const auto& net : gWifiNetworks) {
-        gWifiMulti.addAP(net.ssid.c_str(), net.password.c_str());
-      }
+void setup() {
+  // Phase 1: baseline boot telemetry.
+  Serial.begin(115200);
 
-      // Attempt an initial WiFi connection with a generous 10 s timeout.
-      // If it fails (e.g. the router is temporarily unreachable) the main
-      // loop will retry every 5 s via WiFiMulti::run(500).
-      gWifiMulti.run(10000);
+  esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
+  Serial.print("Wake cause: ");
+  Serial.println(wakeupCauseToText(wakeCause));
 
-      Serial.println("\nESP32 BLE Keyboard Hub - RUN mode");
-      Serial.print("Power source: ");
-      Serial.println(powerSourceToText());
-      KeyLog::add(String("RUN mode: ") + String(gWifiNetworks.size()) + " WiFi network(s) configured");
-      KeyLog::add("RUN mode: waiting for keyboard and mapped keypresses");
-      KeyLog::add(String("Power source: ") + powerSourceToText());
-      // BLE auto-connect starts from loop() via maybeAutoConnectBondedKeyboard().
-    }
+  // Phase 2: early I/O state and user override sampling.
+  initPinsAndLedTask();
 
-    markUserActivity();
+  // Read button early so hold timing is predictable.
+  bool forceConfigMode = isConfigButtonHeldOnBoot();
+
+  // Brief pause to let the serial monitor connect before the first output.
+  delay(800);
+
+  Serial.print("Power source: ");
+  Serial.println(powerSourceToText());
+  KeyLog::add(String("Power source: ") + powerSourceToText());
+
+  // Phase 3: protocol stacks and persisted state.
+  initBleAndHttpStack();
+  loadPersistedConfig();
+  gConfigMode = determineConfigMode(forceConfigMode);
+
+  // Phase 4: mode-specific startup.
+  startSelectedMode();
+
+  markUserActivity();
 }
 
 // ---------------------------------------------------------------------------
@@ -862,50 +876,50 @@ void setup() {
 // at its 5 ms tick regardless, but shorter loop iterations mean less latency
 // between a key press and its HTTP dispatch.
 void loop() {
-    // CONFIG MODE: drive the HTTP server's client-handling state machine.
-    // Must be called frequently (ideally every few ms) to avoid TCP timeouts
-    // on the browser side.
-    if (gConfigMode) {
-      server.handleClient();
+  // CONFIG MODE: drive the HTTP server's client-handling state machine.
+  // Must be called frequently (ideally every few ms) to avoid TCP timeouts
+  // on the browser side.
+  if (gConfigMode) {
+    server.handleClient();
+  }
+
+  // Detect phantom-connected state: NimBLE's gConnected flag can lag behind
+  // the actual link state.  syncConnectionState() reconciles the two by
+  // checking whether the underlying client object still reports connected.
+  BLEKeyboard::syncConnectionState();
+
+  // In RUN mode: if no keyboard is connected and the auto-connect cooldown
+  // has elapsed, scan for the preferred bonded keyboard and reconnect.
+  // The 8 s cooldown prevents the continuous BLE scanning from hogging
+  // the radio and interfering with WiFi.
+  BLEKeyboard::maybeAutoConnectBondedKeyboard();
+
+  if (!gConfigMode) {
+    // WiFi watchdog: if the station link has dropped, ask WiFiMulti to
+    // reconnect.  The 500 ms timeout keeps the loop responsive while still
+    // giving the WiFi stack enough time to complete an association.
+    static unsigned long lastWifiCheck = 0;
+    if (WiFi.status() != WL_CONNECTED && millis() - lastWifiCheck > 5000) {
+      gWifiMulti.run(500);
+      lastWifiCheck = millis();
     }
 
-    // Detect phantom-connected state: NimBLE's gConnected flag can lag behind
-    // the actual link state.  syncConnectionState() reconciles the two by
-    // checking whether the underlying client object still reports connected.
-    BLEKeyboard::syncConnectionState();
+    // Drain the key-press queue: for each pending key code, look up its
+    // mapped path and fire the HTTP GET.  This is synchronous (blocking
+    // during the network round-trip) but acceptable because key presses
+    // are infrequent and the BLE notification callback only queues codes,
+    // never blocks.
+    HttpBridge::processPendingKeys();
 
-    // In RUN mode: if no keyboard is connected and the auto-connect cooldown
-    // has elapsed, scan for the preferred bonded keyboard and reconnect.
-    // The 8 s cooldown prevents the continuous BLE scanning from hogging
-    // the radio and interfering with WiFi.
-    BLEKeyboard::maybeAutoConnectBondedKeyboard();
+    // Poll the physical button for URL cycling / saving.
+    handleButton();
 
-    if (!gConfigMode) {
-      // WiFi watchdog: if the station link has dropped, ask WiFiMulti to
-      // reconnect.  The 500 ms timeout keeps the loop responsive while still
-      // giving the WiFi stack enough time to complete an association.
-      static unsigned long lastWifiCheck = 0;
-      if (WiFi.status() != WL_CONNECTED && millis() - lastWifiCheck > 5000) {
-        gWifiMulti.run(500);
-        lastWifiCheck = millis();
-      }
+    // Enter deep sleep after prolonged inactivity in battery mode.
+    maybeEnterDeepSleep();
+  }
 
-      // Drain the key-press queue: for each pending key code, look up its
-      // mapped path and fire the HTTP GET.  This is synchronous (blocking
-      // during the network round-trip) but acceptable because key presses
-      // are infrequent and the BLE notification callback only queues codes,
-      // never blocks.
-      HttpBridge::processPendingKeys();
-
-      // Poll the physical button for URL cycling / saving.
-      handleButton();
-
-      // Enter deep sleep after prolonged inactivity in battery mode.
-      maybeEnterDeepSleep();
-    }
-
-    // Yield to the FreeRTOS scheduler.  Without at least a 1 ms yield the
-    // idle task on Core 1 never runs, preventing the watchdog from being
-    // fed and causing unexpected resets.  10 ms is a comfortable margin.
-    delay(10);
+  // Yield to the FreeRTOS scheduler.  Without at least a 1 ms yield the
+  // idle task on Core 1 never runs, preventing the watchdog from being
+  // fed and causing unexpected resets.  10 ms is a comfortable margin.
+  delay(10);
 }
