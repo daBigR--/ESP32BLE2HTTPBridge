@@ -29,9 +29,30 @@ Implemented and working:
 
 - Board: Seeed XIAO ESP32S3 (target environment in PlatformIO).
 - BLE keyboard that supports BLE HID.
+- One runtime/config button:
+   - Connected to D10.
+   - Active LOW to GND, using internal pull-up.
+   - Used both for boot-time forced config mode and run-time short/double/long press actions.
+- USB 5V presence sensing (battery vs USB power source):
+   - D7 is fed by an external voltage divider from VBUS (5V).
+   - Expected divider is 100k/100k so D7 sees about 2.5V when USB is present.
+   - USB present -> D7 HIGH, USB absent -> D7 LOW.
 - Optional status LEDs:
    - D1 for BLE status.
    - D3 for HTTP status.
+
+### Hardware Wiring
+
+| Signal | ESP32 Pin | Direction | Electrical Notes |
+| --- | --- | --- | --- |
+| Runtime/Config button | D10 | Input | Active LOW to GND, internal pull-up enabled (`INPUT_PULLUP`). |
+| USB 5V sense (VBUS) | D7 | Input | Read through external divider from VBUS; expected 100k/100k, about 2.5V when USB is present. |
+| BLE status LED | D1 | Output | Active HIGH. |
+| WiFi/HTTP status LED | D3 | Output | Active HIGH. |
+
+USB power detect logic used by firmware:
+- D7 HIGH -> USB present.
+- D7 LOW -> battery-only operation.
 
 ## Build and Upload
 
@@ -60,7 +81,7 @@ platformio device monitor --baud 115200
 Mode selection happens in startup:
 
 - Config mode:
-   - Entered if boot button D9 is held low for about 800 ms during boot, or if required run config is incomplete.
+   - Entered if button D10 is held low for about 800 ms during boot, or if required run config is incomplete.
    - ESP32 starts SoftAP:
       - SSID: ESP32-Keyboard-Hub
       - Password: 12345678
@@ -78,7 +99,7 @@ Run config is considered valid only when all are present:
 
 ## Runtime Button Behavior
 
-The D9 button is active low and uses the internal pull-up.
+The D10 button is active low and uses the internal pull-up.
 
 In run mode:
 

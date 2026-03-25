@@ -26,7 +26,7 @@
 // ---------------
 //   CONFIG MODE — entered when:
 //       • No fully-valid run configuration has been stored yet, OR
-//       • The user holds the boot button (D9) LOW for ≥ 800 ms on power-on
+//       • The user holds the boot button (D10) LOW for ≥ 800 ms on power-on
 //         (allows forced reconfiguration even when a valid config is present).
 //
 //     The device brings up a WiFi SoftAP (SSID "ESP32-Keyboard-Hub") and runs
