@@ -31,10 +31,15 @@ namespace WebBleApi {
 void registerRoutes(WebServer& server) {
 
   // ---- GET /scan ----------------------------------------------------------
-  // Triggers a 4-second active BLE scan, merges results with the bond store,
+  // Triggers an active BLE scan, merges results with the bond store,
   // and returns the list as JSON.  This call blocks until the scan completes.
   server.on("/scan", HTTP_GET, [&server]() {
+    // Suspend auto-connect for this config session so it does not compete
+    // with the scanner.  It will resume automatically after pairing or reboot.
+    BLEKeyboard::setAutoConnectEnabled(false);
+    KeyLog::add("HTTP /scan: starting BLE scan (auto-connect suspended)");
     BleScanner::performScan();
+    KeyLog::add(String("HTTP /scan: complete, devices=") + String(BleScanner::deviceCount()));
     String out = "{\"devices\":" + BleScanner::devicesJson() + "}";
     server.send(200, "application/json", out);
   });
@@ -50,7 +55,9 @@ void registerRoutes(WebServer& server) {
     }
     const String addr = server.arg("addr");
     const String name = server.hasArg("name") ? server.arg("name") : "";
+    KeyLog::add(String("HTTP /pair: addr=") + addr + (name.length() ? String(" name=") + name : String("")));
     const bool   ok   = BLEKeyboard::pairKeyboard(addr, name);
+    KeyLog::add(String("HTTP /pair: ") + (ok ? "ok" : "failed"));
     server.send(200, "application/json",
       ok ? "{\"ok\":true}"
          : "{\"ok\":false,\"error\":\"pair failed (device may not accept new bonding now)\"}");
@@ -66,7 +73,9 @@ void registerRoutes(WebServer& server) {
     }
     const String addr = server.arg("addr");
     const String name = server.hasArg("name") ? server.arg("name") : "";
+    KeyLog::add(String("HTTP /connect: addr=") + addr + (name.length() ? String(" name=") + name : String("")));
     const bool   ok   = BLEKeyboard::connectToKeyboard(addr, name);
+    KeyLog::add(String("HTTP /connect: ") + (ok ? "ok" : "failed"));
     server.send(200, "application/json",
       ok ? "{\"ok\":true}"
          : "{\"ok\":false,\"error\":\"connect failed or device not bonded\"}");
@@ -81,7 +90,9 @@ void registerRoutes(WebServer& server) {
       return;
     }
     const String addr = server.arg("addr");
+    KeyLog::add(String("HTTP /unpair: addr=") + addr);
     const bool   ok   = BLEKeyboard::unpairKeyboard(addr);
+    KeyLog::add(String("HTTP /unpair: ") + (ok ? "ok" : "failed"));
     server.send(200, "application/json",
       ok ? "{\"ok\":true}"
          : "{\"ok\":false,\"error\":\"unpair failed\"}");
@@ -91,6 +102,7 @@ void registerRoutes(WebServer& server) {
   // Drops the active BLE connection without removing the bond.
   // Auto-connect will attempt to reconnect on the next scan cycle.
   server.on("/disconnect", HTTP_GET, [&server]() {
+    KeyLog::add("HTTP /disconnect");
     BLEKeyboard::disconnectKeyboard();
     server.send(200, "application/json", "{\"ok\":true}");
   });

@@ -158,6 +158,11 @@ static const unsigned long CONFIG_BUTTON_HOLD_MS = 800;
 // entering deep sleep. This avoids immediate wake from line bounce/noise.
 static const unsigned long SLEEP_ENTRY_RELEASE_STABLE_MS = 80;
 
+// Native USB CDC on the ESP32-S3 can take a moment to re-enumerate after a
+// reset. Wait briefly for the host serial monitor to reattach before emitting
+// the late startup summary so mode diagnostics are not lost.
+static const unsigned long SERIAL_MONITOR_ATTACH_TIMEOUT_MS = 2000;
+
 // Deep-sleep wake source in phase-1 testing: external runtime button (active LOW).
 static const uint8_t SLEEP_WAKE_BUTTON_PIN = RUNTIME_BUTTON_PIN;
 
@@ -265,6 +270,8 @@ bool   determineConfigMode(bool forceConfigMode);
 void   startConfigModeServer();
 void   startRunModeWiFi();
 void   startSelectedMode();
+void   waitForSerialMonitorAttach();
+void   printLateStartupSummary();
 
 // ---------------------------------------------------------------------------
 // isConfigButtonHeldOnBoot
@@ -836,6 +843,46 @@ void startSelectedMode() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// waitForSerialMonitorAttach — bounded wait for native USB CDC reattach
+// ---------------------------------------------------------------------------
+void waitForSerialMonitorAttach() {
+  if (isRunningOnBattery()) {
+    return;
+  }
+
+  unsigned long started = millis();
+  while (!Serial && millis() - started < SERIAL_MONITOR_ATTACH_TIMEOUT_MS) {
+    delay(10);
+  }
+
+  // Give the host a brief settle window after the port opens so the next
+  // lines are not truncated by the monitor reconnect sequence.
+  delay(150);
+}
+
+// ---------------------------------------------------------------------------
+// printLateStartupSummary — emit mode details after USB monitor reconnect
+// ---------------------------------------------------------------------------
+void printLateStartupSummary() {
+  Serial.println();
+  Serial.println("Startup ready");
+  Serial.print("Mode: ");
+  Serial.println(gConfigMode ? "CONFIG" : "RUN");
+  Serial.print("Power source: ");
+  Serial.println(powerSourceToText());
+
+  if (gConfigMode) {
+    Serial.print("Config AP: ");
+    Serial.println(AP_SSID);
+    Serial.print("Open GUI at: http://");
+    Serial.println(WiFi.softAPIP());
+  } else {
+    Serial.print("WiFi status: ");
+    Serial.println(WiFi.status() == WL_CONNECTED ? "connected" : "not connected yet");
+  }
+}
+
 void setup() {
   // Phase 1: baseline boot telemetry.
   Serial.begin(115200);
@@ -864,6 +911,8 @@ void setup() {
 
   // Phase 4: mode-specific startup.
   startSelectedMode();
+  waitForSerialMonitorAttach();
+  printLateStartupSummary();
 
   markUserActivity();
 }
@@ -888,14 +937,13 @@ void loop() {
   // checking whether the underlying client object still reports connected.
   BLEKeyboard::syncConnectionState();
 
-  // In RUN mode: if no keyboard is connected and the auto-connect cooldown
-  // has elapsed, scan for the preferred bonded keyboard and reconnect.
-  // The 8 s cooldown prevents the continuous BLE scanning from hogging
-  // the radio and interfering with WiFi.
+  // Auto-connect runs in both config and run mode.  In config mode it is
+  // suppressed while a web UI scan is in progress (setAutoConnectEnabled(false)
+  // is called by the /scan handler to avoid scanner contention).  It resumes
+  // automatically after pairing, or on reboot.
   BLEKeyboard::maybeAutoConnectBondedKeyboard();
 
   if (!gConfigMode) {
-    // WiFi watchdog: if the station link has dropped, ask WiFiMulti to
     // reconnect.  The 500 ms timeout keeps the loop responsive while still
     // giving the WiFi stack enough time to complete an association.
     static unsigned long lastWifiCheck = 0;

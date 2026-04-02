@@ -7,15 +7,14 @@
 // information from the BLEKeyboard module.
 //
 // Purpose: The web UI's keyboard discovery flow needs to show the user a list
-// of nearby BLE keyboards annotated with whether each one is already bonded
-// and whether it is currently in pairing mode.  This module handles that scan
-// and builds the annotated JSON payload.
+// of nearby BLE devices annotated with whether each one is already bonded
+// and whether it is currently advertising pairing/discoverable flags. This
+// module handles that scan and builds the annotated JSON payload.
 //
 // Scan strategy:
 //   - Active scan (sends scan-request packets) to retrieve the device name
 //     from the Scan Response, which many keyboards only include there.
-//   - Results are filtered to devices that are either bonded or in pairing
-//     mode, to avoid filling the UI with random Bluetooth devices.
+//   - Results include all scanned devices; pairableNow is advisory metadata.
 //   - Devices that are bonded but were not seen during the scan are still
 //     included with rssi=-127, allowing the user to unpair them from the web
 //     UI even when the physical keyboard is not nearby.
@@ -35,7 +34,10 @@ void performScan();
 //     "name": "<device display name or empty>",
 //     "rssi": <signal strength in dBm, or -127 for bonded-but-not-seen>,
 //     "bonded": <true if NimBLE has a stored bond for this address>,
-//     "pairableNow": <true if device is in Limited Discoverable pairing mode> }
+//     "pairableNow": <true if device is advertising pairing/discoverable flags> }
 String devicesJson();
+
+// Return the number of devices in the most recent scan result set.
+size_t deviceCount();
 
 } // namespace BleScanner

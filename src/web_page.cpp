@@ -92,6 +92,7 @@ const char PAGE[] PROGMEM = R"HTML(
     }
     .pill.ok { background: #dceedd; }
     .pill.warn { background: #efe6cf; color: #765d12; }
+    .pill.info { background: #d4e3f7; color: #1a4a7a; }
     .log {
       height: 260px;
       overflow: auto;
@@ -202,6 +203,7 @@ const char PAGE[] PROGMEM = R"HTML(
     const elState = document.getElementById('state');
     const elDevices = document.getElementById('devices');
     const elKeys = document.getElementById('keys');
+    let currentBondedAddress = ''; // tracks the selected bonded device address
 
     function status(text) {
       elState.textContent = text;
@@ -211,33 +213,109 @@ const char PAGE[] PROGMEM = R"HTML(
       status('Scanning for 4 seconds...');
       const r = await fetch('/scan');
       const data = await r.json();
-      renderDevices(data.devices || []);
+      renderDevices(data.devices || [], currentBondedAddress);
       status('Scan complete');
     }
 
-    function renderDevices(devices) {
+    function renderDevices(devices, selectedBondedAddress = '') {
       elDevices.innerHTML = '';
-      const unpaired = devices.filter(d => !d.bonded && d.pairableNow);
-      if (!unpaired.length) {
-        elDevices.innerHTML = '<li style="border:none;color:var(--muted)">No devices in pairing mode found.</li>';
+      const seen = devices.filter(d => d.seen && d.address.toUpperCase() !== selectedBondedAddress.toUpperCase());
+      if (!seen.length) {
+        elDevices.innerHTML = '<li style="border:none;color:var(--muted)">No BLE devices found in this scan.</li>';
         return;
       }
-      for (const d of unpaired) {
+
+      function byRssi(a, b) {
+        return b.rssi - a.rssi;
+      }
+
+      // Separate named from unnamed.
+      const isUnnamed = d => d.name === '(unnamed)' || d.name === '';
+      const named = seen.filter(d => !isUnnamed(d));
+      const unnamed = seen.filter(d => isUnnamed(d));
+
+      // Within named: discoverable vs. not.
+      const discoverableNamed = named.filter(d => d.pairableNow).sort(byRssi);
+      const nonDiscoverableNamed = named.filter(d => !d.pairableNow).sort(byRssi);
+      
+      // Unnamed devices (will show with more detail in "Other devices" section).
+      const otherDevices = unnamed.sort(byRssi);
+
+      function addSectionHeader(label, color = 'var(--primary)') {
+        const li = document.createElement('li');
+        li.style.cssText = `border:none;padding:8px 0 4px;background:none;display:block;margin-top:12px`;
+        li.innerHTML = `<span style="font-size:1.1em;font-weight:700;color:${color}">${label}</span>`;
+        elDevices.appendChild(li);
+      }
+
+      function addNamedDeviceRow(d) {
         const li = document.createElement('li');
         const left = document.createElement('div');
-        const seenText = d.seen ? 'In range' : 'Not in range';
-        const seenClass = d.seen ? 'ok' : 'warn';
-        const rssiText = d.seen ? ('RSSI ' + d.rssi) : 'offline';
-        left.innerHTML = `<strong>${d.name}</strong><span class="pill ${seenClass}">${seenText}</span><div class="mono">${d.address} | ${rssiText}</div>`;
+        const rssiText = 'RSSI ' + d.rssi;
+        const bondPill = d.bonded
+          ? '<span class="pill info">Bonded</span>'
+          : '<span class="pill warn">Unbonded</span>';
+        left.innerHTML = `<strong>${d.name}</strong>${bondPill}<div class="mono">${d.address} | ${rssiText}</div>`;
         const actions = document.createElement('div');
         actions.className = 'actions';
-        const btn = document.createElement('button');
-        btn.textContent = 'Pair';
-        btn.onclick = () => pairDevice(d.address, d.name);
-        actions.appendChild(btn);
+        if (!d.bonded) {
+          const btn = document.createElement('button');
+          btn.textContent = 'Pair';
+          btn.onclick = () => pairDevice(d.address, d.name);
+          actions.appendChild(btn);
+        } else {
+          const btn = document.createElement('button');
+          btn.className = 'warn';
+          btn.textContent = 'Unpair';
+          btn.onclick = () => unpairDevice(d.address, d.name);
+          actions.appendChild(btn);
+        }
         li.appendChild(left);
         li.appendChild(actions);
         elDevices.appendChild(li);
+      }
+
+      function addUnnamedDeviceRow(d) {
+        const li = document.createElement('li');
+        const left = document.createElement('div');
+        const rssiText = 'RSSI ' + d.rssi;
+        const discoverablePill = d.pairableNow
+          ? '<span class="pill ok">Discoverable</span>'
+          : '<span class="pill warn">Not discoverable</span>';
+        const bondPill = d.bonded
+          ? '<span class="pill info">Bonded</span>'
+          : '<span class="pill warn">Unbonded</span>';
+        left.innerHTML = `<strong>(no name)</strong>${bondPill}${discoverablePill}<div class="mono">${d.address} | ${rssiText}</div>`;
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+        if (!d.bonded) {
+          const btn = document.createElement('button');
+          btn.textContent = 'Pair';
+          btn.onclick = () => pairDevice(d.address, d.name);
+          actions.appendChild(btn);
+        } else {
+          const btn = document.createElement('button');
+          btn.className = 'warn';
+          btn.textContent = 'Unpair';
+          btn.onclick = () => unpairDevice(d.address, d.name);
+          actions.appendChild(btn);
+        }
+        li.appendChild(left);
+        li.appendChild(actions);
+        elDevices.appendChild(li);
+      }
+
+      if (discoverableNamed.length) {
+        addSectionHeader('✓ Discoverable (' + discoverableNamed.length + ')', 'var(--ok)');
+        discoverableNamed.forEach(addNamedDeviceRow);
+      }
+      if (nonDiscoverableNamed.length) {
+        addSectionHeader('⊘ Not Discoverable (' + nonDiscoverableNamed.length + ')', 'var(--warn)');
+        nonDiscoverableNamed.forEach(addNamedDeviceRow);
+      }
+      if (otherDevices.length) {
+        addSectionHeader('◇ Other Devices (' + otherDevices.length + ')', 'var(--muted)');
+        otherDevices.forEach(addUnnamedDeviceRow);
       }
     }
 
@@ -286,8 +364,8 @@ const char PAGE[] PROGMEM = R"HTML(
       const r = await fetch('/pair?addr=' + encodeURIComponent(address) + '&name=' + encodeURIComponent(name));
       const data = await r.json();
       if (data.ok) {
-        status('Paired with ' + name + '. Scan again or connect now.');
-        await scan();
+        status('Paired with ' + name + '. Waiting for automatic reconnect...');
+        await refreshState();
       } else {
         status(data.error || 'Pair failed');
       }
@@ -566,6 +644,7 @@ const char PAGE[] PROGMEM = R"HTML(
     async function refreshState() {
       const r = await fetch('/state');
       const s = await r.json();
+      currentBondedAddress = s.bondedAddress || '';
       const head = s.connected
         ? `Connected: ${s.name || '(unknown)'} (${s.address})`
         : 'Not connected';

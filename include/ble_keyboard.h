@@ -101,6 +101,12 @@ void disconnectKeyboard();
 // preferred bonded keyboard is seen, calls connectToKeyboard() automatically.
 void maybeAutoConnectBondedKeyboard();
 
+// Enable or disable the auto-connect loop.  Pass false when a web UI scan is
+// in progress so the auto-connect scanner does not compete with it.  Pass true
+// again after pairing completes (pairKeyboard() does this automatically).
+// Auto-connect is enabled by default at startup.
+void setAutoConnectEnabled(bool enabled);
+
 // Checks NimBLE's live connection state and updates the cached isConnected flag.
 // Detects unexpected disconnections (e.g. keyboard powered off) so that the
 // LED logic and main loop see the change immediately.

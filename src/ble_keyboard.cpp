@@ -87,6 +87,18 @@ String gPreferredBondedName    = "";
 // the radio and disrupt WiFi.
 unsigned long gLastAutoConnectAttemptMs = 0;
 const unsigned long AUTO_CONNECT_INTERVAL_MS = 8000; // 8 s between retries
+const unsigned long POST_PAIR_RECONNECT_DELAY_MS = 3000; // settle time for finicky remotes
+
+// When false, maybeAutoConnectBondedKeyboard() is a no-op.  Disabled by the
+// web UI /scan handler to prevent scanner contention; re-enabled automatically
+// after a successful pair or by an explicit setAutoConnectEnabled(true) call.
+bool gAutoConnectEnabled = true;
+
+// Recently paired target gets first auto-connect priority so we reconnect the
+// device the user just paired even if preferred-bond canonicalization is
+// ambiguous for that cycle.
+String gPendingReconnectAddress = "";
+String gPendingReconnectName    = "";
 
 // Last non-zero key code received via HID notification (exposed through
 // lastKeyCode() for the web UI status endpoint).
@@ -163,6 +175,7 @@ void logConnectionSecurity(const String& prefix);
 bool openKeyboardLink(const String& address, const String& nameHint);
 bool canPairDeviceNow(const String& address, String& reason);
 bool removeBondByAddress(const String& address);
+void pruneBondsExcept(const String& keepAddress);
 
 // ---------------------------------------------------------------------------
 // notifyCallback — HID input-report notification handler
@@ -405,6 +418,25 @@ bool removeBondByAddress(const String& address) {
   return removed;
 }
 
+// Keep only the specified bonded device and remove all others.
+void pruneBondsExcept(const String& keepAddress) {
+  std::vector<String> toRemove;
+  const int bondCount = NimBLEDevice::getNumBonds();
+  toRemove.reserve(bondCount);
+  for (int i = 0; i < bondCount; i++) {
+    String bondedAddr = String(NimBLEDevice::getBondedAddress(i).toString().c_str());
+    if (!bondedAddr.equalsIgnoreCase(keepAddress)) {
+      toRemove.push_back(bondedAddr);
+    }
+  }
+
+  for (const String& addr : toRemove) {
+    if (removeBondByAddress(addr)) {
+      addKeyLog(String("Removed old bond: ") + addr);
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // canPairDeviceNow — checks whether a device is currently in pairing mode
 // ---------------------------------------------------------------------------
@@ -459,12 +491,35 @@ bool canPairDeviceNow(const String& address, String& reason) {
 // Always resets the connection-state variables so other code sees a clean
 // "not connected" state immediately, regardless of whether the link was
 // already down before this call.
+//
+// The 500 ms wait after disconnect() lets the BLE stack finish tearing down
+// the link before deleteClient() frees the client object.  Calling
+// deleteClient while the radio is still processing a disconnect can corrupt
+// NimBLE's internal state and cause hard-to-reproduce reconnect failures.
+// If the link does not drop within 500 ms we abandon the client pointer
+// rather than risk a crash — the memory leaks but the state is at least
+// consistent.
 void disconnectKeyboard() {
   if (gClient) {
     if (gClient->isConnected()) {
       gClient->disconnect();
+      // Wait up to 500 ms for the BLE stack to finish the teardown.
+      unsigned long t = millis();
+      while (gClient->isConnected() && millis() - t < 500) {
+        delay(10);
+      }
+      if (gClient->isConnected()) {
+        // Stack did not complete disconnect in time — abandon the pointer
+        // rather than delete a still-active client.
+        addKeyLog("Disconnect timeout: client abandoned");
+        gClient = nullptr;
+        gConnected        = false;
+        gConnectedName    = "";
+        gConnectedAddress = "";
+        return;
+      }
     }
-    NimBLEDevice::deleteClient(gClient); // frees NimBLE internal resources
+    NimBLEDevice::deleteClient(gClient);
     gClient = nullptr;
   }
   gConnected        = false;
@@ -489,6 +544,14 @@ void disconnectKeyboard() {
 //      gClient->connect(NimBLEAddress) which uses the address directly.
 bool openKeyboardLink(const String& address, const String& nameHint) {
   disconnectKeyboard(); // ensure clean state before attempting a new connection
+
+  // If the previous client was abandoned (disconnect timeout above), bail
+  // immediately rather than layering a new connection attempt on top of a
+  // potentially still-active BLE link.
+  if (gClient != nullptr) {
+    addKeyLog("Connect aborted: previous client still active");
+    return false;
+  }
 
   gClient = NimBLEDevice::createClient();
   gClient->setClientCallbacks(new ClientCallbacks(), true); // true = auto-delete
@@ -518,12 +581,26 @@ bool openKeyboardLink(const String& address, const String& nameHint) {
     // can use the address type and resolve RPAs correctly.
     ok = gClient->connect(target, false);
     delete target;
-  } else {
+    if (!ok) {
+      addKeyLog("Connect via scan record failed, trying direct address");
+    }
+  }
+
+  if (!ok) {
     // Fallback: the device was not seen in the scan (may be in directed
-    // advertising or just powering up).  NimBLE will attempt a direct
-    // connection using the address string alone.
-    addKeyLog("Device not found in fresh scan, trying direct address");
+    // advertising or just powering up), or connect(target) failed.
+    // First try NimBLE's generic address constructor (historically the most
+    // compatible path), then explicit RANDOM/PUBLIC address types.
+    if (!target) {
+      addKeyLog("Device not found in fresh scan, trying direct address");
+    }
     ok = gClient->connect(NimBLEAddress(address.c_str()), false);
+    if (!ok) {
+      ok = gClient->connect(NimBLEAddress(address.c_str(), BLE_ADDR_RANDOM), false);
+    }
+    if (!ok) {
+      ok = gClient->connect(NimBLEAddress(address.c_str(), BLE_ADDR_PUBLIC), false);
+    }
   }
 
   if (!ok) {
@@ -582,13 +659,15 @@ bool isBondedAddress(const String& address) {
 // ---------------------------------------------------------------------------
 // isAdvertisedAsPairingMode — interprets the LE advertising flags
 // ---------------------------------------------------------------------------
-// The "Limited Discoverable Mode" flag (bit 0 of the advertising flags AD
-// type) is set by most BLE keyboards when the user puts them into pairing
-// mode.  We use this as a proxy for "will accept a new bond".
-// Note: "General Discoverable" (bit 1) is set during normal operation on
-// some keyboards, so we only look at bit 0 to avoid false positives.
+// Returns true if the device is advertising as discoverable — either:
+//   • Bit 0 (0x01) = LE Limited Discoverable Mode  — used by most keyboards
+//     only during an explicit pairing window (typically ~30 s).
+//   • Bit 1 (0x02) = LE General Discoverable Mode  — used by some devices
+//     (e.g. Boox RemoteControl, Kobo Remote) at all times to indicate they
+//     will accept a new bond without a separate pairing-mode trigger.
+// Both are valid indicators that the device will accept a fresh bond.
 bool isAdvertisedAsPairingMode(NimBLEAdvertisedDevice& d) {
-  return (d.getAdvFlags() & 0x01) != 0;
+  return (d.getAdvFlags() & 0x03) != 0; // bit 0 = Limited, bit 1 = General
 }
 
 // ---------------------------------------------------------------------------
@@ -632,7 +711,8 @@ void clearPreferredBondedDevice() {
 //
 // Flow:
 //   1. If already bonded, just record it as the preferred device and return.
-//   2. Verify the keyboard is currently advertising in pairing mode.
+//   2. Probe whether the keyboard is currently advertising in pairing mode
+//      (advisory only; does not hard-block pairing attempts).
 //   3. Open a raw GAP connection via openKeyboardLink().
 //   4. Run the SMP pairing/bonding handshake via secureConnection().
 //   5. Verify a bond was actually stored — some keyboards accept the SMP
@@ -645,14 +725,27 @@ bool pairKeyboard(const String& address, const String& nameHint) {
     // Device is already bonded — just adopt it as the preferred device.
     gPreferredBondedAddress = address;
     gPreferredBondedName    = nameHint;
+    pruneBondsExcept(gPreferredBondedAddress);
+    gPendingReconnectAddress = gPreferredBondedAddress;
+    gPendingReconnectName    = gPreferredBondedName;
+    gAutoConnectEnabled     = true;
+    gLastAutoConnectAttemptMs = 0; // attempt on next loop iteration
     addKeyLog("Device already bonded");
     return true;
   }
 
+  // Snapshot current bond list so we can identify which address was added by
+  // this pairing attempt (important for peripherals that rotate/resolve addr).
+  std::vector<String> bondsBefore;
+  const int beforeCount = NimBLEDevice::getNumBonds();
+  bondsBefore.reserve(beforeCount);
+  for (int i = 0; i < beforeCount; i++) {
+    bondsBefore.push_back(String(NimBLEDevice::getBondedAddress(i).toString().c_str()));
+  }
+
   String pairReason;
   if (!canPairDeviceNow(address, pairReason)) {
-    addKeyLog(String("Pair rejected: ") + pairReason);
-    return false;
+    addKeyLog(String("Pair pre-check advisory: ") + pairReason);
   }
   if (pairReason != "ok") {
     addKeyLog(pairReason);
@@ -681,10 +774,38 @@ bool pairKeyboard(const String& address, const String& nameHint) {
     return false;
   }
 
-  gPreferredBondedAddress = address;
+  String preferredAddress = address;
+  if (!isBondedAddress(preferredAddress)) {
+    const int afterCount = NimBLEDevice::getNumBonds();
+    for (int i = 0; i < afterCount; i++) {
+      String candidate = String(NimBLEDevice::getBondedAddress(i).toString().c_str());
+      bool existedBefore = false;
+      for (const String& oldAddr : bondsBefore) {
+        if (candidate.equalsIgnoreCase(oldAddr)) {
+          existedBefore = true;
+          break;
+        }
+      }
+      if (!existedBefore) {
+        preferredAddress = candidate;
+        addKeyLog(String("Pair address canonicalized: ") + preferredAddress);
+        break;
+      }
+    }
+  }
+
+  gPreferredBondedAddress = preferredAddress;
   gPreferredBondedName    = nameHint;
+  pruneBondsExcept(gPreferredBondedAddress);
+  gPendingReconnectAddress = gPreferredBondedAddress;
+  gPendingReconnectName    = nameHint;
   addKeyLog("Bond stored; disconnecting until normal connect");
   disconnectKeyboard(); // auto-connect will handle the reconnection
+  // Re-enable auto-connect and trigger reconnect soon, but not immediately.
+  // Some remotes need a short settle period after bond store/disconnect.
+  gAutoConnectEnabled        = true;
+  gLastAutoConnectAttemptMs  = millis() - (AUTO_CONNECT_INTERVAL_MS - POST_PAIR_RECONNECT_DELAY_MS);
+  addKeyLog(String("Auto-connect scheduled in ") + String(POST_PAIR_RECONNECT_DELAY_MS) + String(" ms"));
   return true;
 }
 
@@ -736,7 +857,14 @@ bool connectToKeyboard(const String& address, const String& nameHint) {
     return false;
   }
 
-  if (!gClient->getConnInfo().isEncrypted()) {
+  // D07-class remotes have been observed to hang inside secureConnection()
+  // during bonded reconnect.  For those devices we skip the explicit SMP
+  // trigger and continue to HID subscription directly.
+  bool skipExplicitSecureReconnect =
+    nameHint.equalsIgnoreCase("D07") ||
+    nameHint.indexOf("D07") >= 0;
+
+  if (!gClient->getConnInfo().isEncrypted() && !skipExplicitSecureReconnect) {
     // The keyboard has not encrypted the link on its own — initiate from
     // our side using the stored LTK.
     addKeyLog("Restoring secure bonded connection");
@@ -745,6 +873,8 @@ bool connectToKeyboard(const String& address, const String& nameHint) {
       disconnectKeyboard();
       return false;
     }
+  } else if (skipExplicitSecureReconnect && !gClient->getConnInfo().isEncrypted()) {
+    addKeyLog("Skipping explicit secure reconnect for D07");
   }
 
   gPreferredBondedAddress = address;
@@ -753,16 +883,25 @@ bool connectToKeyboard(const String& address, const String& nameHint) {
 
   if (!subscribeToKeyboard()) {
     addKeyLog("Connected, but keyboard input subscribe failed");
+    // Force a clean disconnect so gConnected goes false and auto-connect
+    // can retry — without this the client stays connected but unusable
+    // and auto-connect never triggers because it sees gConnected == true.
+    disconnectKeyboard();
     return false;
   }
   return true;
 }
 
 // Public wrapper that delegates to the private disconnectKeyboard() helper.
-// Exposed so the web UI's /disconnect endpoint can drop the link without
-// accessing internal state directly.
 void disconnectKeyboard() {
   ::disconnectKeyboard();
+}
+
+void setAutoConnectEnabled(bool enabled) {
+  gAutoConnectEnabled = enabled;
+  if (enabled) {
+    gLastAutoConnectAttemptMs = 0; // trigger immediately on next loop
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -777,12 +916,28 @@ void disconnectKeyboard() {
 // would saturate the radio, increase power consumption, and interfere with
 // WiFi (both share the 2.4 GHz band).
 void maybeAutoConnectBondedKeyboard() {
+  if (!gAutoConnectEnabled) {
+    return; // suspended — web UI scan in progress or explicitly disabled
+  }
   if (gConnected) {
     return; // already connected — nothing to do
   }
 
   if (millis() - gLastAutoConnectAttemptMs < AUTO_CONNECT_INTERVAL_MS) {
     return; // still in cooldown period
+  }
+
+  // First priority: reconnect the device that was just paired.
+  if (gPendingReconnectAddress.length() > 0) {
+    gLastAutoConnectAttemptMs = millis();
+    addKeyLog(String("Auto-connecting recently paired keyboard: ") + gPendingReconnectAddress);
+    if (connectToKeyboard(gPendingReconnectAddress, gPendingReconnectName)) {
+      gPendingReconnectAddress = "";
+      gPendingReconnectName    = "";
+      return;
+    }
+
+    addKeyLog("Auto-connect (recent pair) failed");
   }
 
   // Refresh in case a new bond was stored (or the old one deleted) since
@@ -804,14 +959,23 @@ void maybeAutoConnectBondedKeyboard() {
   scan->clearResults();
 
   NimBLEScanResults results = scan->start(2, false); // 2 s — short but sufficient
+  int preferredByAddrIdx = -1;
+
   for (int i = 0; i < results.getCount(); i++) {
     NimBLEAdvertisedDevice d = results.getDevice(i);
     String found = String(d.getAddress().toString().c_str());
-    if (!found.equalsIgnoreCase(gPreferredBondedAddress)) {
-      continue;
+    if (found.equalsIgnoreCase(gPreferredBondedAddress)) {
+      preferredByAddrIdx = i;
+      break;
     }
-    // Keyboard is visible — attempt a full bonded reconnect.
+  }
+
+  int chosenIdx = preferredByAddrIdx;
+  if (chosenIdx >= 0) {
+    NimBLEAdvertisedDevice d = results.getDevice(chosenIdx);
+    String found = String(d.getAddress().toString().c_str());
     String name = d.haveName() ? String(d.getName().c_str()) : gPreferredBondedName;
+
     addKeyLog(String("Auto-connecting to bonded keyboard: ") + found);
     if (!connectToKeyboard(found, name)) {
       addKeyLog("Auto-connect failed");

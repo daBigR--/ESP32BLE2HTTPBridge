@@ -13,10 +13,8 @@
 // with NimBLE's bond store:
 //
 //   • Scanned device is bonded     → include with seen=true, bonded=true.
-//   • Scanned device is NOT bonded BUT is advertising in pairing mode
-//                                  → include with seen=true, pairableNow=true.
-//   • Scanned device is NOT bonded and NOT in pairing mode
-//                                  → exclude (not relevant to the user).
+//   • Scanned device is NOT bonded → include with seen=true.
+//                                  pairableNow is still reported as advisory.
 //   • Bonded device not seen in scan → include with seen=false, rssi=-127
 //                                    so the user can still unpair it.
 //
@@ -46,7 +44,7 @@ struct DiscoveredDevice {
   int    rssi;        // Signal strength in dBm; -127 = not currently seen
   bool   bonded;      // True if NimBLE has a stored bond for this address
   bool   seen;        // True if the device appeared in the current scan
-  bool   pairableNow; // True if seen AND advertising as Limited Discoverable
+  bool   pairableNow; // Advisory: currently advertising pairing/discoverable flags
 };
 
 // Results of the most recent scan.  Overwritten on each performScan() call.
@@ -57,36 +55,37 @@ static std::vector<DiscoveredDevice> gDevices;
 namespace BleScanner {
 
 // ---------------------------------------------------------------------------
-// performScan — execute a 4-second active BLE scan
+// performScan — execute a 10-second active BLE scan
 // ---------------------------------------------------------------------------
 // Clears gDevices, performs the scan, then merges with the bond store.
+//
+// Scan parameters are chosen for maximum detection probability:
+//   • 100 % duty cycle (window == interval) so no advertising window is missed.
+//   • 10 seconds gives time to catch devices that advertise slowly (≥1 s
+//     interval) when they are in their normal/reconnect advertising state.
+//   • Filter policy 0 (accept all) — no white-list or address filtering.
+// Note: a BLE peripheral that is currently *connected* to another host will
+//   not be advertising and therefore cannot be detected.  Disconnect it from
+//   the phone / other host before scanning.
 void performScan() {
   gDevices.clear();
 
   NimBLEScan* scan = NimBLEDevice::getScan();
-  scan->setInterval(80);       // scan interval in units of 0.625 ms ≈ 50 ms
-  scan->setWindow(40);         // scan window ≈ 25 ms (duty cycle = 50%)
-  scan->setActiveScan(true);   // send scan-request to get full adv payload
+  scan->setInterval(16);          // 10 ms interval (units of 0.625 ms)
+  scan->setWindow(16);            // 10 ms window — 100 % duty cycle
+  scan->setActiveScan(true);      // send scan-request to get full adv payload
+  scan->setFilterPolicy(0);       // 0 = accept all (no white-list filtering)
   scan->clearResults();
 
   NimBLEScanResults results = scan->start(4, false); // 4 s, do not block BLE stack
   for (int i = 0; i < results.getCount(); i++) {
     NimBLEAdvertisedDevice d = results.getDevice(i);
-    if (!d.haveName()) {
-      continue; // skip anonymous devices — not keyboards
-    }
-
     String address     = String(d.getAddress().toString().c_str());
     bool   bonded      = BLEKeyboard::isBondedAddress(address);
     bool   pairableNow = !bonded && BLEKeyboard::isAdvertisedAsPairingMode(d);
 
-    // Only include devices that are relevant to the user.
-    if (!bonded && !pairableNow) {
-      continue;
-    }
-
     DiscoveredDevice item;
-    item.name        = String(d.getName().c_str());
+    item.name        = d.haveName() ? String(d.getName().c_str()) : String("(unnamed)");
     item.address     = address;
     item.rssi        = d.getRSSI();
     item.bonded      = bonded;
@@ -147,6 +146,10 @@ String devicesJson() {
   }
   out += "]";
   return out;
+}
+
+size_t deviceCount() {
+  return gDevices.size();
 }
 
 } // namespace BleScanner
