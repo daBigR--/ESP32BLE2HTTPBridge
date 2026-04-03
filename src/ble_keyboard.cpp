@@ -602,11 +602,17 @@ bool openKeyboardLink(const String& address, const String& nameHint) {
   addKeyLog(String("Connecting to ") + address);
   NimBLEAdvertisedDevice* target = nullptr;
   NimBLEScanResults results = scan->start(4, false); // 4 s scan
-  for (int i = 0; i < results.getCount(); i++) {
+  int scanCount = results.getCount();
+  addKeyLog(String("Scan found ") + String(scanCount) + String(" devices"));
+  
+  for (int i = 0; i < scanCount; i++) {
     NimBLEAdvertisedDevice d = results.getDevice(i);
     String found = String(d.getAddress().toString().c_str());
     if (found.equalsIgnoreCase(address)) {
       target = new NimBLEAdvertisedDevice(d); // copy; scan results are invalidated
+      addKeyLog(String("Target found in scan; addr type=") + String(d.getAddressType()) + 
+                String(" flags=0x") + String(d.getAdvFlags(), HEX) + 
+                String(" rssi=") + String(d.getRSSI()));
       break;
     }
   }
@@ -615,10 +621,14 @@ bool openKeyboardLink(const String& address, const String& nameHint) {
   if (target) {
     // Preferred: connect via the full advertising device record so NimBLE
     // can use the address type and resolve RPAs correctly.
+    addKeyLog("Attempting connect via advertised device record");
+    delay(100); // give peripheral time to stabilize after scan
     ok = gClient->connect(target, false);
     delete target;
     if (!ok) {
-      addKeyLog("Connect via scan record failed, trying direct address");
+      addKeyLog(String("Connect via scan record failed rc=") + String(gClient->getLastError()));
+    } else {
+      addKeyLog("Connected via advertised device record");
     }
   }
 
@@ -628,23 +638,42 @@ bool openKeyboardLink(const String& address, const String& nameHint) {
     // First try NimBLE's generic address constructor (historically the most
     // compatible path), then explicit RANDOM/PUBLIC address types.
     if (!target) {
-      addKeyLog("Device not found in fresh scan, trying direct address");
+      addKeyLog("Device not found in fresh scan, trying direct address fallback");
     }
+    
+    addKeyLog("Trying direct address generic");
     ok = gClient->connect(NimBLEAddress(address.c_str()), false);
     if (!ok) {
+      addKeyLog(String("Direct generic failed rc=") + String(gClient->getLastError()) + String("; trying BLE_ADDR_RANDOM"));
       ok = gClient->connect(NimBLEAddress(address.c_str(), BLE_ADDR_RANDOM), false);
     }
     if (!ok) {
+      addKeyLog(String("BLE_ADDR_RANDOM failed rc=") + String(gClient->getLastError()) + String("; trying BLE_ADDR_PUBLIC"));
       ok = gClient->connect(NimBLEAddress(address.c_str(), BLE_ADDR_PUBLIC), false);
+      if (!ok) {
+        addKeyLog(String("BLE_ADDR_PUBLIC failed rc=") + String(gClient->getLastError()));
+        
+        // Extended retry: some devices need a longer connection window or multiple attempts
+        addKeyLog("Retrying with extended timeout (20s connection window)");
+        gClient->setConnectTimeout(20);
+        delay(200);
+        ok = gClient->connect(NimBLEAddress(address.c_str(), BLE_ADDR_PUBLIC), false);
+        gClient->setConnectTimeout(10); // restore default
+        if (!ok) {
+          addKeyLog(String("Extended retry failed rc=") + String(gClient->getLastError()));
+        }
+      }
     }
   }
 
   if (!ok) {
-    addKeyLog("Connect failed");
+    addKeyLog(String("Connect failed, final rc=") + String(gClient->getLastError()));
     NimBLEDevice::deleteClient(gClient);
     gClient = nullptr;
     return false;
   }
+
+  addKeyLog("Connect succeeded");
 
   gConnectedName    = nameHint;
   gConnectedAddress = address;

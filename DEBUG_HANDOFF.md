@@ -36,16 +36,39 @@ auto-connect in config mode. Auto-connect is re-enabled after successful pairing
 	- Kobo Remote: still fails to pair at link-open (`Connect failed`) even when visible in scan.
 - Last attempted Kobo experiments (same-name alternate connect + HID subscription dedupe) were reverted after causing regressions in other devices.
 
-## Next Phase: Reconnection
+## V1 Acceptance Summary (April 2-3 2026)
 
-Reconnect to bonded keyboard was unreliable before the BLE rebuild — this is the remaining known issue.
-Key notes from prior work:
-- Connect via fresh advertised device (preserves address type) rather than direct string address.
-- RPA resolution requires stored IRK; NimBLE stores it during bonding.
-- Do not touch the scan/pair/bond flow — it is working.
+**Phase: All 4 devices pair/reconnect/key-report (NO HACKS)**
+
+### ✓ COMPLETED (3 of 4 devices)
+
+**MK321BT**: pair (5/5) → reconnect (reboot/reset cycles all work) → keypress (perfect, no dupes/misses)
+**Boox RemoteControl**: pair (5/5) → reconnect (identical to MK321) → keypress (perfect)
+**D07**: pair (5/5) → reconnect (identical to others; no hangs with bounded async security) → keypress (delivers keys; multicode is device design)
+
+All use encrypted+bonded reconnect via generic `trySecurityUpgradeWithTimeout()` (commit 160ba09)
+No device-specific BLE branches remain
+
+### ❌ BLOCKED (1 of 4 devices)
+
+**Kobo Remote**: 
+- Visible in scan (flags=0x6, addr_type=0, good RSSI)
+- GAP connection fails with rc=574 on all paths: advertised-device, generic, RANDOM, PUBLIC, extended 20s timeout
+- **Critical clue**: worked in earlier intermediate uncommitted version → fix is targeted/small, not major refactor
+- Unpaired from Sage, still fails identically
+
+### Code Changes This Session
+
+1. Phase 1 Audit: removed D07-specific SMP bypass (no device names in BLE logic now)
+2. Implemented bounded async security upgrade (avoids blocking hangs)
+3. Added Kobo diagnostics logging to show scan details + per-attempt error codes
+
+**Next step**: User will investigate what changed in pairing between earlier working version and current
 
 ## If Starting a New Session
 
 1. Read this file first.
-2. Scan and pair are verified working — do not re-investigate them.
-3. Focus is reconnect reliability.
+2. V1 goal: 4/4 devices pair/reconnect/keys without hacks.
+3. Status: 3/4 working perfectly. Kobo blocks; GAP connection rc=574.
+4. Kobo history: worked before → user will debug what changed.
+5. Do not apply more generic tuning; wait for user's investigation.
