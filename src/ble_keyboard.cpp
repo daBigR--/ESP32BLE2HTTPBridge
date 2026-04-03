@@ -88,6 +88,7 @@ String gPreferredBondedName    = "";
 unsigned long gLastAutoConnectAttemptMs = 0;
 const unsigned long AUTO_CONNECT_INTERVAL_MS = 8000; // 8 s between retries
 const unsigned long POST_PAIR_RECONNECT_DELAY_MS = 3000; // settle time for finicky remotes
+const unsigned long RECONNECT_SECURITY_WAIT_MS = 1200; // bounded wait for async security upgrade
 
 // When false, maybeAutoConnectBondedKeyboard() is a no-op.  Disabled by the
 // web UI /scan handler to prevent scanner contention; re-enabled automatically
@@ -176,6 +177,7 @@ bool openKeyboardLink(const String& address, const String& nameHint);
 bool canPairDeviceNow(const String& address, String& reason);
 bool removeBondByAddress(const String& address);
 void pruneBondsExcept(const String& keepAddress);
+bool trySecurityUpgradeWithTimeout();
 
 // ---------------------------------------------------------------------------
 // notifyCallback — HID input-report notification handler
@@ -381,6 +383,40 @@ void logConnectionSecurity(const String& prefix) {
   line += " authenticated="; line += info.isAuthenticated() ? "yes" : "no";
   line += " bonded=";        line += info.isBonded()        ? "yes" : "no";
   addKeyLog(line);
+}
+
+// ---------------------------------------------------------------------------
+// trySecurityUpgradeWithTimeout — bounded reconnect security restoration
+// ---------------------------------------------------------------------------
+// On reconnect we prefer encrypted links for devices that support bond-based
+// security restoration, but we must avoid indefinite blocking calls that can
+// hang with some peripherals.  This helper starts security asynchronously and
+// waits for a short bounded window for encryption to become active.
+bool trySecurityUpgradeWithTimeout() {
+  if (!gClient || !gClient->isConnected()) {
+    return false;
+  }
+
+  if (gClient->getConnInfo().isEncrypted()) {
+    return true;
+  }
+
+  int rc = NimBLEDevice::startSecurity(gClient->getConnId());
+  if (rc != 0) {
+    addKeyLog(String("Security upgrade start failed rc=") + String(rc));
+    return false;
+  }
+
+  unsigned long t0 = millis();
+  while (gClient && gClient->isConnected() && (millis() - t0 < RECONNECT_SECURITY_WAIT_MS)) {
+    if (gClient->getConnInfo().isEncrypted()) {
+      return true;
+    }
+    delay(20);
+  }
+
+  addKeyLog("Security upgrade timeout");
+  return gClient && gClient->isConnected() && gClient->getConnInfo().isEncrypted();
 }
 
 // ---------------------------------------------------------------------------
@@ -842,11 +878,9 @@ bool unpairKeyboard(const String& address) {
 // This is the normal-operation connect path (not pairing).  It:
 //   1. Refuses to connect if the device is not bonded (safety guard).
 //   2. Opens a raw GAP connection via openKeyboardLink().
-//   3. Re-establishes encryption using the stored LTK via secureConnection().
-//      Some keyboards will have already initiated encryption themselves;
-//      the isEncrypted() check skips the redundant secureConnection() call
-//      in that case.
-//   4. Subscribes to HID input characteristics so key presses start flowing.
+//   3. Tries HID subscription immediately.
+//   4. If subscription fails on an unencrypted link, attempts secureConnection()
+//      and retries HID subscription once.
 bool connectToKeyboard(const String& address, const String& nameHint) {
   if (!isBondedAddress(address)) {
     addKeyLog("Connect rejected: device is not bonded. Pair it first.");
@@ -857,38 +891,34 @@ bool connectToKeyboard(const String& address, const String& nameHint) {
     return false;
   }
 
-  // D07-class remotes have been observed to hang inside secureConnection()
-  // during bonded reconnect.  For those devices we skip the explicit SMP
-  // trigger and continue to HID subscription directly.
-  bool skipExplicitSecureReconnect =
-    nameHint.equalsIgnoreCase("D07") ||
-    nameHint.indexOf("D07") >= 0;
+  bool subscribed = subscribeToKeyboard();
+  if (!subscribed) {
+    addKeyLog("Initial HID subscribe failed");
 
-  if (!gClient->getConnInfo().isEncrypted() && !skipExplicitSecureReconnect) {
-    // The keyboard has not encrypted the link on its own — initiate from
-    // our side using the stored LTK.
-    addKeyLog("Restoring secure bonded connection");
-    if (!gClient->secureConnection()) {
-      addKeyLog("Secure reconnect failed");
+    if (gClient && gClient->isConnected() && !gClient->getConnInfo().isEncrypted()) {
+      addKeyLog("Retrying subscribe after security upgrade");
+      if (trySecurityUpgradeWithTimeout()) {
+        subscribed = subscribeToKeyboard();
+      }
+    }
+
+    if (!subscribed) {
+      addKeyLog("Connected, but keyboard input subscribe failed");
       disconnectKeyboard();
       return false;
     }
-  } else if (skipExplicitSecureReconnect && !gClient->getConnInfo().isEncrypted()) {
-    addKeyLog("Skipping explicit secure reconnect for D07");
+  }
+
+  // Even if subscription worked on an open link, try to restore encryption
+  // opportunistically for devices that support bonded reconnect security.
+  if (!gClient->getConnInfo().isEncrypted()) {
+    addKeyLog("Reconnect link not encrypted yet; attempting bounded security upgrade");
+    trySecurityUpgradeWithTimeout();
   }
 
   gPreferredBondedAddress = address;
   gPreferredBondedName    = nameHint;
   logConnectionSecurity("Ready to use");
-
-  if (!subscribeToKeyboard()) {
-    addKeyLog("Connected, but keyboard input subscribe failed");
-    // Force a clean disconnect so gConnected goes false and auto-connect
-    // can retry — without this the client stays connected but unusable
-    // and auto-connect never triggers because it sees gConnected == true.
-    disconnectKeyboard();
-    return false;
-  }
   return true;
 }
 

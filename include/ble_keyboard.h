@@ -85,9 +85,9 @@ bool pairKeyboard(const String& address, const String& nameHint);
 // Returns true if a bond was found and removed.
 bool unpairKeyboard(const String& address);
 
-// Connect to a previously bonded keyboard at address, restore BLE encryption
-// using the stored LTK, subscribe to HID input report notifications, and set
-// the keyboard as the active connected device.
+// Connect to a previously bonded keyboard at address, apply generic reconnect
+// security checks, subscribe to HID input report notifications, and set the
+// keyboard as the active connected device.
 // Blocks until connected and subscribed, or until an internal timeout.
 // Returns true on success.
 bool connectToKeyboard(const String& address, const String& nameHint);
