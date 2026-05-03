@@ -90,7 +90,7 @@ bool unpairKeyboard(const String& address);
 // keyboard as the active connected device.
 // Blocks until connected and subscribed, or until an internal timeout.
 // Returns true on success.
-bool connectToKeyboard(const String& address, const String& nameHint);
+bool connectToKeyboard(const String& address, const String& nameHint, NimBLEAdvertisedDevice* scanTarget = nullptr);
 
 // Gracefully disconnect from the currently connected keyboard without removing
 // its bond.  Auto-connect will attempt to reconnect on the next scan cycle.

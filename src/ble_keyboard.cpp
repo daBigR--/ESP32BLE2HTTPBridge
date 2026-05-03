@@ -48,6 +48,7 @@
 // =============================================================================
 
 #include "ble_keyboard.h"
+#include <NimBLEUtils.h>
 
 #include <vector>
 
@@ -173,7 +174,7 @@ class SecurityCallbacks : public NimBLESecurityCallbacks {
 // Forward declarations for functions defined later in this anonymous namespace.
 void disconnectKeyboard();
 void logConnectionSecurity(const String& prefix);
-bool openKeyboardLink(const String& address, const String& nameHint);
+bool openKeyboardLink(const String& address, const String& nameHint, bool useFreshScan = true, NimBLEAdvertisedDevice* scanTarget = nullptr);
 bool canPairDeviceNow(const String& address, String& reason);
 bool removeBondByAddress(const String& address);
 void pruneBondsExcept(const String& keepAddress);
@@ -402,9 +403,12 @@ bool trySecurityUpgradeWithTimeout() {
   }
 
   int rc = NimBLEDevice::startSecurity(gClient->getConnId());
-  if (rc != 0) {
+  if (rc != 0 && rc != BLE_HS_EALREADY) {
     addKeyLog(String("Security upgrade start failed rc=") + String(rc));
     return false;
+  }
+  if (rc == BLE_HS_EALREADY) {
+    addKeyLog("Security already in progress (peripheral-initiated)");
   }
 
   unsigned long t0 = millis();
@@ -501,19 +505,8 @@ bool canPairDeviceNow(const String& address, String& reason) {
       continue;
     }
 
-    uint8_t flags   = d.getAdvFlags();
-    uint8_t advType = d.getAdvType();
-    bool    directed = d.haveTargetAddress() || advType == 1 || advType == 4;
-    if (BLEKeyboard::isAdvertisedAsPairingMode(d)) {
-      reason = "ok";
-      return true;
-    }
-
-    // Device found but not in pairing mode — give a diagnostic reason string.
-    reason = String("device not advertising for new pairing (advType=") +
-             String(advType) + String(", flags=0x") + String(flags, HEX) +
-             String(", directed=") + String(directed ? 1 : 0) + String(")");
-    return false;
+    reason = "ok";
+    return true;
   }
 
   reason = "device not currently advertising";
@@ -578,7 +571,7 @@ void disconnectKeyboard() {
 //   2. If the device is not visible in the scan (it may be in directed-ADV
 //      mode aimed at us, which is invisible to active scans), fall back to
 //      gClient->connect(NimBLEAddress) which uses the address directly.
-bool openKeyboardLink(const String& address, const String& nameHint) {
+bool openKeyboardLink(const String& address, const String& nameHint, bool useFreshScan, NimBLEAdvertisedDevice* scanTarget) {
   disconnectKeyboard(); // ensure clean state before attempting a new connection
 
   // If the previous client was abandoned (disconnect timeout above), bail
@@ -586,47 +579,113 @@ bool openKeyboardLink(const String& address, const String& nameHint) {
   // potentially still-active BLE link.
   if (gClient != nullptr) {
     addKeyLog("Connect aborted: previous client still active");
+    if (scanTarget) {
+      delete scanTarget;
+    }
     return false;
   }
 
   gClient = NimBLEDevice::createClient();
   gClient->setClientCallbacks(new ClientCallbacks(), true); // true = auto-delete
   gClient->setConnectTimeout(10); // seconds; long enough for slow keyboards
-
-  NimBLEScan* scan = NimBLEDevice::getScan();
-  scan->setInterval(80);
-  scan->setWindow(40);
-  scan->setActiveScan(true);
-  scan->clearResults();
+  gClient->setConnectionParams(24, 40, 0, 42); // 30-50 ms interval matches Kobo/HOGP peripherals; 420 ms supervision timeout
+#if CONFIG_BT_NIMBLE_EXT_ADV
+  // With CONFIG_BT_NIMBLE_EXT_ADV, connect() uses ble_gap_ext_connect() with
+  // the default phyMask = 1M|2M|CODED.  Sending a 3-PHY extended connection
+  // request to a legacy BLE 4.x device (e.g. Kobo Remote) causes rc=574
+  // because the peripheral only understands 1M legacy connection initiation.
+  // Force 1M-only so the controller uses a backward-compatible connection request.
+  gClient->setConnectPhy(BLE_GAP_LE_PHY_1M_MASK);
+#endif
 
   addKeyLog(String("Connecting to ") + address);
-  NimBLEAdvertisedDevice* target = nullptr;
-  NimBLEScanResults results = scan->start(4, false); // 4 s scan
-  int scanCount = results.getCount();
-  addKeyLog(String("Scan found ") + String(scanCount) + String(" devices"));
-  
-  for (int i = 0; i < scanCount; i++) {
-    NimBLEAdvertisedDevice d = results.getDevice(i);
-    String found = String(d.getAddress().toString().c_str());
-    if (found.equalsIgnoreCase(address)) {
-      target = new NimBLEAdvertisedDevice(d); // copy; scan results are invalidated
-      addKeyLog(String("Target found in scan; addr type=") + String(d.getAddressType()) + 
-                String(" flags=0x") + String(d.getAdvFlags(), HEX) + 
-                String(" rssi=") + String(d.getRSSI()));
-      break;
+  NimBLEAdvertisedDevice* target = scanTarget;
+  NimBLEAddress explicitTargetAddress;
+  int explicitTargetType = -1;
+  if (scanTarget) {
+    explicitTargetAddress = scanTarget->getAddress();
+    explicitTargetType    = scanTarget->getAddressType();
+    addKeyLog(String("Using existing advertised scan record; addr=") + String(explicitTargetAddress.toString().c_str()) +
+              String(" addr type=") + String(explicitTargetType) +
+              String(" flags=0x") + String(scanTarget->getAdvFlags(), HEX) +
+              String(" rssi=") + String(scanTarget->getRSSI()));
+  } else if (useFreshScan) {
+    class TargetScanCB : public NimBLEAdvertisedDeviceCallbacks {
+      public:
+        TargetScanCB(const String& addr, NimBLEAdvertisedDevice** targetPtr)
+          : address(addr), ppTarget(targetPtr) {}
+
+        void onResult(NimBLEAdvertisedDevice* d) override {
+          String found = String(d->getAddress().toString().c_str());
+          if (!found.equalsIgnoreCase(address)) {
+            return;
+          }
+          // Stop on first match regardless of advType/isConnectable().
+          // isConnectable() is unreliable under CONFIG_BT_NIMBLE_EXT_ADV for
+          // legacy BLE 4.x advertisers (advType=0 can report as non-connectable).
+          if (!*ppTarget) {
+            *ppTarget = new NimBLEAdvertisedDevice(*d);
+          }
+          NimBLEDevice::getScan()->stop();
+        }
+
+      private:
+        const String address;
+        NimBLEAdvertisedDevice** ppTarget;
+    } callback(address, &target);
+
+    NimBLEScan* scan = NimBLEDevice::getScan();
+    scan->setAdvertisedDeviceCallbacks(&callback, false);
+    scan->setInterval(80);
+    scan->setWindow(80);    // full duty-cycle: window == interval for fastest detection
+    scan->setActiveScan(false); // passive scan — ADV_IND fires callback immediately
+                                // without waiting for SCAN_RSP; SCAN_RSP overwrites
+                                // advType to 4 (non-connectable) which breaks connect()
+    scan->setDuplicateFilter(false); // allow multiple adverts from the same device
+    scan->clearResults();
+
+    scan->start(4, false); // 4 s scan, non-blocking
+    while (scan->isScanning()) {
+      delay(10);
     }
+
+    NimBLEScanResults results = scan->getResults();
+    int scanCount = results.getCount();
+    addKeyLog(String("Scan found ") + String(scanCount) + String(" devices"));
+    if (target) {
+      addKeyLog(String("Target found in scan; addr type=") + String(target->getAddressType()) +
+                String(" flags=0x") + String(target->getAdvFlags(), HEX) +
+                String(" rssi=") + String(target->getRSSI()) +
+                String(" advType=0x") + String(target->getAdvType(), HEX));
+    }
+    scan->setAdvertisedDeviceCallbacks(nullptr);
+  } else {
+    addKeyLog("Skipping fresh scan for bonded connect");
   }
 
   bool ok = false;
   if (target) {
+    if (explicitTargetType >= 0) {
+      addKeyLog(String("Target scan record address=") + String(explicitTargetAddress.toString().c_str()) +
+                String(" type=") + String(explicitTargetType));
+    } else {
+      addKeyLog(String("Target scan record address=") + String(target->getAddress().toString().c_str()));
+    }
     // Preferred: connect via the full advertising device record so NimBLE
     // can use the address type and resolve RPAs correctly.
     addKeyLog("Attempting connect via advertised device record");
     delay(100); // give peripheral time to stabilize after scan
     ok = gClient->connect(target, false);
+    if (!ok && explicitTargetType >= 0) {
+      addKeyLog(String("Connect via scan record failed rc=") + String(gClient->getLastError()) +
+                String(" (") + String(NimBLEUtils::returnCodeToString(gClient->getLastError())) + String(")"));
+      addKeyLog(String("Retrying with explicit scan-record address type=") + String(explicitTargetType));
+      ok = gClient->connect(NimBLEAddress(explicitTargetAddress.toString().c_str(), explicitTargetType), false);
+    }
     delete target;
     if (!ok) {
-      addKeyLog(String("Connect via scan record failed rc=") + String(gClient->getLastError()));
+      addKeyLog(String("Connect via scan record failed rc=") + String(gClient->getLastError()) +
+                String(" (") + String(NimBLEUtils::returnCodeToString(gClient->getLastError())) + String(")"));
     } else {
       addKeyLog("Connected via advertised device record");
     }
@@ -651,17 +710,15 @@ bool openKeyboardLink(const String& address, const String& nameHint) {
       addKeyLog(String("BLE_ADDR_RANDOM failed rc=") + String(gClient->getLastError()) + String("; trying BLE_ADDR_PUBLIC"));
       ok = gClient->connect(NimBLEAddress(address.c_str(), BLE_ADDR_PUBLIC), false);
       if (!ok) {
-        addKeyLog(String("BLE_ADDR_PUBLIC failed rc=") + String(gClient->getLastError()));
-        
-        // Extended retry: some devices need a longer connection window or multiple attempts
-        addKeyLog("Retrying with extended timeout (20s connection window)");
-        gClient->setConnectTimeout(20);
-        delay(200);
-        ok = gClient->connect(NimBLEAddress(address.c_str(), BLE_ADDR_PUBLIC), false);
-        gClient->setConnectTimeout(10); // restore default
-        if (!ok) {
-          addKeyLog(String("Extended retry failed rc=") + String(gClient->getLastError()));
-        }
+        addKeyLog(String("BLE_ADDR_PUBLIC failed rc=") + String(gClient->getLastError()) + String("; trying BLE_ADDR_RANDOM_ID"));
+        ok = gClient->connect(NimBLEAddress(address.c_str(), BLE_ADDR_RANDOM_ID), false);
+      }
+      if (!ok) {
+        addKeyLog(String("BLE_ADDR_RANDOM_ID failed rc=") + String(gClient->getLastError()) + String("; trying BLE_ADDR_PUBLIC_ID"));
+        ok = gClient->connect(NimBLEAddress(address.c_str(), BLE_ADDR_PUBLIC_ID), false);
+      }
+      if (!ok) {
+        addKeyLog(String("BLE_ADDR_PUBLIC_ID failed rc=") + String(gClient->getLastError()));
       }
     }
   }
@@ -816,7 +873,10 @@ bool pairKeyboard(const String& address, const String& nameHint) {
     addKeyLog(pairReason);
   }
 
-  if (!openKeyboardLink(address, nameHint)) {
+  // openKeyboardLink uses its own callback scan that stops immediately on
+  // finding the target and connects right away — do not pass the advisory
+  // scan result here, that record is stale by the time we'd use it.
+  if (!openKeyboardLink(address, nameHint, true)) {
     return false;
   }
 
@@ -907,42 +967,44 @@ bool unpairKeyboard(const String& address) {
 // This is the normal-operation connect path (not pairing).  It:
 //   1. Refuses to connect if the device is not bonded (safety guard).
 //   2. Opens a raw GAP connection via openKeyboardLink().
-//   3. Tries HID subscription immediately.
-//   4. If subscription fails on an unencrypted link, attempts secureConnection()
-//      and retries HID subscription once.
-bool connectToKeyboard(const String& address, const String& nameHint) {
+//   3. Restores link encryption before any GATT work — HOGP-compliant
+//      peripherals (e.g. Kobo) require encryption before they will respond
+//      to attribute discovery or CCCD writes.
+//   4. Subscribes to HID input characteristics.
+bool connectToKeyboard(const String& address, const String& nameHint, NimBLEAdvertisedDevice* scanTarget) {
   if (!isBondedAddress(address)) {
     addKeyLog("Connect rejected: device is not bonded. Pair it first.");
-    return false;
-  }
-
-  if (!openKeyboardLink(address, nameHint)) {
-    return false;
-  }
-
-  bool subscribed = subscribeToKeyboard();
-  if (!subscribed) {
-    addKeyLog("Initial HID subscribe failed");
-
-    if (gClient && gClient->isConnected() && !gClient->getConnInfo().isEncrypted()) {
-      addKeyLog("Retrying subscribe after security upgrade");
-      if (trySecurityUpgradeWithTimeout()) {
-        subscribed = subscribeToKeyboard();
-      }
+    if (scanTarget) {
+      delete scanTarget;
     }
+    return false;
+  }
 
-    if (!subscribed) {
-      addKeyLog("Connected, but keyboard input subscribe failed");
+  // Scan when no pre-discovered record is provided (e.g. post-pair auto-connect).
+  // Devices with public addresses (Kobo) require a scan-record connect; direct
+  // address attempts fail with rc=574 without advertising context.
+  bool doFreshScan = (scanTarget == nullptr);
+  if (!openKeyboardLink(address, nameHint, doFreshScan, scanTarget)) {
+    return false;
+  }
+
+  // Restore encryption before any GATT work.  Devices that enforce
+  // BLE_ATT_ERR_INSUFFICIENT_AUTHENTICATION on discovery will fail if we
+  // send ATT requests on an unencrypted link.
+  if (!gClient->getConnInfo().isEncrypted()) {
+    addKeyLog("Upgrading link security before GATT work");
+    if (!trySecurityUpgradeWithTimeout()) {
+      addKeyLog("Security upgrade failed; aborting connect");
       disconnectKeyboard();
       return false;
     }
   }
 
-  // Even if subscription worked on an open link, try to restore encryption
-  // opportunistically for devices that support bonded reconnect security.
-  if (!gClient->getConnInfo().isEncrypted()) {
-    addKeyLog("Reconnect link not encrypted yet; attempting bounded security upgrade");
-    trySecurityUpgradeWithTimeout();
+  bool subscribed = subscribeToKeyboard();
+  if (!subscribed) {
+    addKeyLog("Connected, but keyboard input subscribe failed");
+    disconnectKeyboard();
+    return false;
   }
 
   gPreferredBondedAddress = address;
@@ -1032,11 +1094,12 @@ void maybeAutoConnectBondedKeyboard() {
   int chosenIdx = preferredByAddrIdx;
   if (chosenIdx >= 0) {
     NimBLEAdvertisedDevice d = results.getDevice(chosenIdx);
+    NimBLEAdvertisedDevice* target = new NimBLEAdvertisedDevice(d); // keep a copy beyond scan lifetime
     String found = String(d.getAddress().toString().c_str());
     String name = d.haveName() ? String(d.getName().c_str()) : gPreferredBondedName;
 
     addKeyLog(String("Auto-connecting to bonded keyboard: ") + found);
-    if (!connectToKeyboard(found, name)) {
+    if (!connectToKeyboard(found, name, target)) {
       addKeyLog("Auto-connect failed");
     }
     return;
