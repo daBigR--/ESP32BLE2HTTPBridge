@@ -68,6 +68,12 @@ NimBLEClient* gClient = nullptr;
 // ClientCallbacks so other code can read it without querying the BLE stack.
 bool gConnected = false;
 
+// Last HCI disconnect reason code, set just before onDisconnect fires.
+// 0 means no disconnect has occurred yet this session.
+// Key values: 0x3D=MIC Failure (LTK mismatch), 0x05/0x06=Auth/Key Missing,
+//             0x13=Remote User Terminated, 0x22=LMP Response Timeout.
+uint8_t gLastDisconnectReason = 0;
+
 // Name and address of the currently connected keyboard (kept for the web UI
 // status endpoint).  Cleared in disconnectKeyboard().
 String gConnectedName    = "";
@@ -209,6 +215,7 @@ static void notifyCallback(NimBLERemoteCharacteristic* pRemoteCharacteristic,
       continue; // key slot empty
     }
     gLastKeyCode = pData[i];
+    addKeyLog("HID notify received"); // DIAG: confirm notifications are arriving
     if (gKeyPressFn) {
       gKeyPressFn(pData[i]); // call the main application handler
     }
@@ -237,10 +244,11 @@ class ClientCallbacks : public NimBLEClientCallbacks {
 
   // Called when the link is dropped for any reason (keyboard powered off,
   // moved out of range, BLE stack timeout, etc.).
-  void onDisconnect(NimBLEClient* pClient) override {
+  void onDisconnect(NimBLEClient* pClient, int reason) override {
     (void)pClient;
     gConnected = false;
-    addKeyLog("Disconnected");
+    gLastDisconnectReason = (uint8_t)(reason & 0xFF);
+    addKeyLog(String("Disconnected reason=0x") + String(gLastDisconnectReason, HEX));
   }
 
   // The peripheral has requested a connection parameter update (interval,
@@ -364,6 +372,47 @@ bool subscribeToKeyboard() {
 
   addKeyLog(String("Subscribed HID characteristics: ") + String(gSubscribedCharacteristicCount));
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// subscribeServiceChanged — enable Service Changed indications before HID setup
+// ---------------------------------------------------------------------------
+// Some HOGP-compliant peripherals send a Service Changed indication at the
+// start of each encrypted session to signal that the GATT table may have
+// been modified since the last bond.  If the client has not registered for
+// these indications (CCCD 0x0002 on characteristic 0x2A05 of service 0x1801)
+// the peripheral may stall waiting for the client to acknowledge the
+// indication before it will respond to subsequent ATT requests.
+//
+// Called after encryption is active and before any HID CCCD writes.
+// Fails gracefully (logs and returns) if 0x1801 or 0x2A05 is not present.
+void subscribeServiceChanged() {
+  if (!gClient || !gClient->isConnected()) {
+    return;
+  }
+
+  NimBLERemoteService* gattSvc = gClient->getService("1801");
+  if (!gattSvc) {
+    addKeyLog("SvcChg: service 0x1801 not present, skipping");
+    return;
+  }
+
+  NimBLERemoteCharacteristic* scChr = gattSvc->getCharacteristic("2A05");
+  if (!scChr) {
+    addKeyLog("SvcChg: characteristic 0x2A05 not present, skipping");
+    return;
+  }
+
+  if (!scChr->canIndicate()) {
+    addKeyLog("SvcChg: 0x2A05 does not support indicate, skipping");
+    return;
+  }
+
+  // Write 0x0002 (indicate-enable) to the CCCD; subscribe(false,...) = indicate.
+  // nullptr callback: we don't need to process the indication content,
+  // we only need the peripheral to see that we are registered.
+  bool ok = scChr->subscribe(false, nullptr);
+  addKeyLog(ok ? "SvcChg: subscribed to 0x2A05 indicate" : "SvcChg: subscribe failed (non-fatal)");
 }
 
 // ---------------------------------------------------------------------------
@@ -924,13 +973,24 @@ bool pairKeyboard(const String& address, const String& nameHint) {
   pruneBondsExcept(gPreferredBondedAddress);
   gPendingReconnectAddress = gPreferredBondedAddress;
   gPendingReconnectName    = nameHint;
-  addKeyLog("Bond stored; disconnecting until normal connect");
-  disconnectKeyboard(); // auto-connect will handle the reconnection
-  // Re-enable auto-connect and trigger reconnect soon, but not immediately.
-  // Some remotes need a short settle period after bond store/disconnect.
-  gAutoConnectEnabled        = true;
-  gLastAutoConnectAttemptMs  = millis() - (AUTO_CONNECT_INTERVAL_MS - POST_PAIR_RECONNECT_DELAY_MS);
-  addKeyLog(String("Auto-connect scheduled in ") + String(POST_PAIR_RECONNECT_DELAY_MS) + String(" ms"));
+
+  // DIAG: skip post-pair disconnect — stay on the live encrypted link and
+  // attempt HID subscription now.  This tests whether the first encrypted
+  // session works without the round-trip reconnect that fails on Kobo.
+  addKeyLog("DIAG: staying connected after pair; attempting HID subscribe");
+  gAutoConnectEnabled = true;
+  if (subscribeToKeyboard()) {
+    gConnectedName    = nameHint;
+    gConnectedAddress = preferredAddress;
+    logConnectionSecurity("Post-pair HID ready");
+    gPendingReconnectAddress = ""; // already connected, no pending reconnect needed
+    gPendingReconnectName    = "";
+  } else {
+    addKeyLog("DIAG: HID subscribe failed on live link; falling back to disconnect+reconnect");
+    disconnectKeyboard();
+    gLastAutoConnectAttemptMs = millis() - (AUTO_CONNECT_INTERVAL_MS - POST_PAIR_RECONNECT_DELAY_MS);
+    addKeyLog(String("Auto-connect scheduled in ") + String(POST_PAIR_RECONNECT_DELAY_MS) + String(" ms"));
+  }
   return true;
 }
 
@@ -999,6 +1059,11 @@ bool connectToKeyboard(const String& address, const String& nameHint, NimBLEAdve
       return false;
     }
   }
+
+  // Subscribe to Service Changed indications (service 0x1801 / char 0x2A05)
+  // before writing any HID CCCDs.  Some HOGP peripherals stall if they send
+  // a Service Changed indication and the client has not registered for it.
+  subscribeServiceChanged();
 
   bool subscribed = subscribeToKeyboard();
   if (!subscribed) {

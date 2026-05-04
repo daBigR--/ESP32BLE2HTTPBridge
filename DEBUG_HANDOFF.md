@@ -72,3 +72,11 @@ No device-specific BLE branches remain
 3. Status: 3/4 working perfectly. Kobo blocks; GAP connection rc=574.
 4. Kobo history: worked before → user will debug what changed.
 5. Do not apply more generic tuning; wait for user's investigation.
+
+## Aside Note (UI Follow-up)
+
+- Bonded-device info shown in the web UI should include the device name when available, not only MAC.
+- Current observed case: Boox connected successfully but bonded panel showed MAC-only.
+- Scope of this note: UI display polish only; BLE connection behavior is functioning for Boox.
+- Scan list UX: keep the "Other Devices" section collapsed by default and expand only when the user explicitly opens it.
+- Add battery monitoring via an ADC voltage divider so the firmware can report battery level and support low-battery behavior.
