@@ -1175,6 +1175,15 @@ void maybeAutoConnectBondedKeyboard() {
     }
     return;
   }
+
+  // Device not found in scan — some bonded peripherals (e.g. Kobo) stop
+  // general advertising after bonding and will not appear in a scan, but
+  // still accept a direct-address connection.  Try anyway; openKeyboardLink()
+  // has a direct-address fallback that mirrors the manual /connect path.
+  addKeyLog("Preferred device not in scan, attempting direct connect");
+  if (!connectToKeyboard(gPreferredBondedAddress, gPreferredBondedName, nullptr)) {
+    addKeyLog("Auto-connect (direct) failed");
+  }
 }
 
 // ---------------------------------------------------------------------------
