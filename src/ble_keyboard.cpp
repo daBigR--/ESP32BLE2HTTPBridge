@@ -457,7 +457,13 @@ bool trySecurityUpgradeWithTimeout() {
     return false;
   }
   if (rc == BLE_HS_EALREADY) {
+    // Peripheral has already initiated the handshake — it owns the exchange.
+    // Proceeding to GATT immediately is correct; encryption completes
+    // asynchronously during the 500 ms delay inside discoverAttributes().
+    // Waiting in a poll loop here causes the Kobo to disconnect before the
+    // loop times out (observed: "DisconSecurity upgrade timeout" in log).
     addKeyLog("Security already in progress (peripheral-initiated)");
+    return true;
   }
 
   unsigned long t0 = millis();
