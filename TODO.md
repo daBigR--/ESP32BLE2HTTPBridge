@@ -5,10 +5,11 @@
 - [x] **Device validation sweep**: all devices pairing, connecting, and subscribing
       correctly as of 2026-05-05.
 
-- [ ] **Review subscribed BLE services**: the current code subscribes to nearly all
+- [x] **Review subscribed BLE services**: the current code subscribes to nearly all
       services published by the keyboard. Audit which services are actually needed for
       key capture and limit subscriptions to only those — over-subscribing may cause
       instability or unexpected behavior on some devices.
+      Note: not really multiple services but some multiple key presses on single event solved by burst signatures.
 
 - [ ] **Mode-aware connection behavior**: differentiate reconnect logic by operating mode.
       - **CONFIG mode**:
@@ -27,7 +28,7 @@
 - [ ] Bonded-device panel: show device name when available, not only MAC address.
       (Observed: Boox connected successfully but bonded panel showed MAC-only.)
 
-- [ ] Scan list: collapse "Other Devices" section by default; expand only on user tap.
+- [x] Scan list: collapse "Other Devices" section by default; expand only on user tap.
 
 ## Cleanup / Tech Debt
 

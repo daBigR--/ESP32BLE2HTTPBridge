@@ -283,7 +283,8 @@ const char PAGE[] PROGMEM = R"HTML(
         elDevices.appendChild(li);
       }
 
-      function addUnnamedDeviceRow(d) {
+      function addUnnamedDeviceRow(d, target) {
+        const container = target || elDevices;
         const li = document.createElement('li');
         const left = document.createElement('div');
         const rssiText = 'RSSI ' + d.rssi;
@@ -310,7 +311,7 @@ const char PAGE[] PROGMEM = R"HTML(
         }
         li.appendChild(left);
         li.appendChild(actions);
-        elDevices.appendChild(li);
+        container.appendChild(li);
       }
 
       if (discoverableNamed.length) {
@@ -322,8 +323,22 @@ const char PAGE[] PROGMEM = R"HTML(
         nonDiscoverableNamed.forEach(addNamedDeviceRow);
       }
       if (otherDevices.length) {
-        addSectionHeader('◇ Other Devices (' + otherDevices.length + ')', 'var(--muted)');
-        otherDevices.forEach(addUnnamedDeviceRow);
+        const detailsLi = document.createElement('li');
+        detailsLi.style.cssText = 'border:none;padding:0;background:none;display:block;margin-top:12px';
+        const details = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.style.cssText = 'font-size:1.1em;font-weight:700;color:var(--muted);cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:6px';
+        summary.innerHTML = '&#9656; Other Devices (' + otherDevices.length + ')';
+        details.appendChild(summary);
+        details.addEventListener('toggle', () => {
+          summary.innerHTML = (details.open ? '&#9662;' : '&#9656;') + ' Other Devices (' + otherDevices.length + ')';
+        });
+        const innerUl = document.createElement('ul');
+        innerUl.style.cssText = 'list-style:none;padding:0;margin:4px 0 0 0';
+        otherDevices.forEach(d => addUnnamedDeviceRow(d, innerUl));
+        details.appendChild(innerUl);
+        detailsLi.appendChild(details);
+        elDevices.appendChild(detailsLi);
       }
     }
 
