@@ -32,7 +32,7 @@
 
 ## Cleanup / Tech Debt
 
-- [ ] Delete `BLEPairBasicDiagnostic/` and `BLEPairBasicDiagnosticBaseline/` directories —
+- [x] Delete `BLEPairBasicDiagnostic/` and `BLEPairBasicDiagnosticBaseline/` directories —
       these were temporary debugging aids and are no longer needed.
 
 ## Firmware
