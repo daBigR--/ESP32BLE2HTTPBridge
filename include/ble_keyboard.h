@@ -97,9 +97,9 @@ bool connectToKeyboard(const String& address, const String& nameHint, NimBLEAdve
 // its bond.  Auto-connect will attempt to reconnect on the next scan cycle.
 void disconnectKeyboard();
 
-// Called from the main loop once per iteration.  If AUTO_CONNECT_INTERVAL_MS
-// has elapsed since the last attempt, performs a ~2 s BLE scan; if the
-// preferred bonded keyboard is seen, calls connectToKeyboard() automatically.
+// Called from the main loop once per iteration.  Implements mode-aware
+// reconnect policy: CONFIG mode caps at 2 boot attempts; RUN mode uses
+// exponential backoff (1/5/15/30/60 s).
 void maybeAutoConnectBondedKeyboard();
 
 // Enable or disable the auto-connect loop.  Pass false when a web UI scan is
@@ -107,6 +107,16 @@ void maybeAutoConnectBondedKeyboard();
 // again after pairing completes (pairKeyboard() does this automatically).
 // Auto-connect is enabled by default at startup.
 void setAutoConnectEnabled(bool enabled);
+
+// Switch between CONFIG (false) and RUN (true) reconnect policy.  Call once
+// from main.cpp after the operating mode is determined, and again on any
+// runtime mode change.
+void setReconnectMode(bool runMode);
+
+// Reset all reconnect state so the next maybeAutoConnectBondedKeyboard() call
+// attempts an immediate connect.  Use this when the user explicitly requests a
+// connection (e.g. HTTP /connect) to bypass pending backoff.
+void resetReconnectState();
 
 // Checks NimBLE's live connection state and updates the cached isConnected flag.
 // Detects unexpected disconnections (e.g. keyboard powered off) so that the

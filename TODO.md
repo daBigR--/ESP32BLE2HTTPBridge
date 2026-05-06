@@ -23,6 +23,11 @@
       Eliminates UI intrusion in config mode while preserving transparent recovery
       in run mode.
 
+- [ ] **Config-mode button behavior**: D10 is currently ignored during CONFIG mode runtime.
+      - Short press → switch to RUN mode immediately (without reboot if possible).
+      - Long press (≥800 ms) → reboot.
+      - RUN-mode button behavior (short = cycle URL, long = save/sleep) stays unchanged.
+
 ## UI Polish
 
 - [ ] Bonded-device panel: show device name when available, not only MAC address.

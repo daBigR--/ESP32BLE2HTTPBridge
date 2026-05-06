@@ -91,13 +91,35 @@ size_t gSubscribedCharacteristicCount = 0;
 String gPreferredBondedAddress = "";
 String gPreferredBondedName    = "";
 
-// Timestamp of the last auto-connect attempt.  Compared against millis() to
-// enforce the quiet period between retries so BLE scanning does not saturate
-// the radio and disrupt WiFi.
-unsigned long gLastAutoConnectAttemptMs = 0;
-const unsigned long AUTO_CONNECT_INTERVAL_MS = 8000; // 8 s between retries
+// ---------------------------------------------------------------------------
+// Reconnect policy constants
+// ---------------------------------------------------------------------------
+// RUN mode: exponential-ish backoff steps (ms).  Clamped at the last value.
+static const uint32_t RUN_BACKOFF_MS[]      = {1000, 5000, 15000, 30000, 60000};
+static const int      RUN_BACKOFF_COUNT     = (int)(sizeof(RUN_BACKOFF_MS) / sizeof(RUN_BACKOFF_MS[0]));
+// CONFIG mode: at most 2 boot attempts, 5 s apart.  After that, wait for user.
+static const uint32_t CONFIG_BOOT_RETRY_GAP_MS  = 5000;
+static const int      CONFIG_BOOT_MAX_ATTEMPTS  = 2;
+
 const unsigned long POST_PAIR_RECONNECT_DELAY_MS = 3000; // settle time for finicky remotes
 const unsigned long RECONNECT_SECURITY_WAIT_MS = 1200; // bounded wait for async security upgrade
+
+// ---------------------------------------------------------------------------
+// Reconnect state
+// ---------------------------------------------------------------------------
+// true = RUN mode (backoff retries); false = CONFIG mode (boot cap then stop).
+bool gRunMode              = false;
+// Scheduled time for the next attempt (millis).  0 = try immediately.
+unsigned long gNextRetryMs = 0;
+// RUN mode backoff step index.  Clamped to RUN_BACKOFF_COUNT-1.
+int  gRunBackoffIndex      = 0;
+// CONFIG mode: how many boot attempts have fired so far.
+int  gBootAttemptCount     = 0;
+// true once a disconnect (not just boot) has been seen — drives post-disconnect
+// backoff start in RUN mode.
+bool gDisconnectSeen       = false;
+// Reconnect scheduling is active when true.
+bool gRetryArmed           = false;
 
 // When false, maybeAutoConnectBondedKeyboard() is a no-op.  Disabled by the
 // web UI /scan handler to prevent scanner contention; re-enabled automatically
@@ -283,6 +305,11 @@ class ClientCallbacks : public NimBLEClientCallbacks {
     gConnected = true;
     gLastNotificationMs = 0; // reset burst state on each new connection
     gLastSignature = "";     // reset last sig so UI doesn't show stale data
+    // Reset all reconnect state: connection succeeded.
+    gRetryArmed       = false;
+    gRunBackoffIndex  = 0;
+    gBootAttemptCount = 0;
+    gDisconnectSeen   = false;
     addKeyLog("Connected");
   }
 
@@ -295,6 +322,19 @@ class ClientCallbacks : public NimBLEClientCallbacks {
     gLastSignature = "";     // reset last sig on disconnect
     gLastDisconnectReason = (uint8_t)(reason & 0xFF);
     addKeyLog(String("Disconnected reason=0x") + String(gLastDisconnectReason, HEX));
+    // Arm reconnect scheduler.
+    gDisconnectSeen = true;
+    if (gRunMode) {
+      // RUN: start backoff from step 0.
+      gRunBackoffIndex = 0;
+      gNextRetryMs     = millis() + RUN_BACKOFF_MS[0];
+      gRetryArmed      = true;
+      addKeyLog(String("[RECON] mode=RUN trigger=disconnect retry_index=0 (after ") + String(RUN_BACKOFF_MS[0]) + "ms)");
+    } else {
+      // CONFIG: do not auto-retry after a disconnect.
+      gRetryArmed = false;
+      addKeyLog("[RECON] mode=CONFIG disconnect, no auto-retry");
+    }
   }
 
   // The peripheral has requested a connection parameter update (interval,
@@ -952,7 +992,7 @@ bool pairKeyboard(const String& address, const String& nameHint) {
     gPendingReconnectAddress = gPreferredBondedAddress;
     gPendingReconnectName    = gPreferredBondedName;
     gAutoConnectEnabled     = true;
-    gLastAutoConnectAttemptMs = 0; // attempt on next loop iteration
+    gNextRetryMs = 0; // attempt on next loop iteration
     addKeyLog("Device already bonded");
     return true;
   }
@@ -1040,7 +1080,9 @@ bool pairKeyboard(const String& address, const String& nameHint) {
   } else {
     addKeyLog("DIAG: HID subscribe failed on live link; falling back to disconnect+reconnect");
     disconnectKeyboard();
-    gLastAutoConnectAttemptMs = millis() - (AUTO_CONNECT_INTERVAL_MS - POST_PAIR_RECONNECT_DELAY_MS);
+    // Schedule reconnect after POST_PAIR_RECONNECT_DELAY_MS settle time.
+    gNextRetryMs = millis() + POST_PAIR_RECONNECT_DELAY_MS;
+    gRetryArmed  = true;
     addKeyLog(String("Auto-connect scheduled in ") + String(POST_PAIR_RECONNECT_DELAY_MS) + String(" ms"));
   }
   return true;
@@ -1138,58 +1180,53 @@ void disconnectKeyboard() {
 void setAutoConnectEnabled(bool enabled) {
   gAutoConnectEnabled = enabled;
   if (enabled) {
-    gLastAutoConnectAttemptMs = 0; // trigger immediately on next loop
+    gNextRetryMs = 0; // trigger immediately on next loop
   }
 }
 
 // ---------------------------------------------------------------------------
-// maybeAutoConnectBondedKeyboard — called from the main loop
+// setReconnectMode — switch between CONFIG and RUN reconnect policy
 // ---------------------------------------------------------------------------
-// Periodically scans for the preferred bonded keyboard and connects to it
-// automatically without any user interaction.  This is what makes RUN mode
-// self-healing: if the keyboard is power-cycled or goes out of range, normal
-// operation resumes a few seconds after it comes back.
-//
-// The AUTO_CONNECT_INTERVAL_MS cooldown prevents continuous scanning, which
-// would saturate the radio, increase power consumption, and interfere with
-// WiFi (both share the 2.4 GHz band).
-void maybeAutoConnectBondedKeyboard() {
-  if (!gAutoConnectEnabled) {
-    return; // suspended — web UI scan in progress or explicitly disabled
-  }
-  if (gConnected) {
-    return; // already connected — nothing to do
-  }
-
-  if (millis() - gLastAutoConnectAttemptMs < AUTO_CONNECT_INTERVAL_MS) {
-    return; // still in cooldown period
-  }
-
-  // First priority: reconnect the device that was just paired.
-  if (gPendingReconnectAddress.length() > 0) {
-    gLastAutoConnectAttemptMs = millis();
-    addKeyLog(String("Auto-connecting recently paired keyboard: ") + gPendingReconnectAddress);
-    if (connectToKeyboard(gPendingReconnectAddress, gPendingReconnectName)) {
-      gPendingReconnectAddress = "";
-      gPendingReconnectName    = "";
-      return;
+// Call once from main.cpp after the mode is determined (setup), and again
+// if the mode ever changes at runtime.
+void setReconnectMode(bool runMode) {
+  if (runMode == gRunMode) return; // no change
+  if (runMode) {
+    // Switching CONFIG → RUN: start backoff from step 0 if not connected.
+    gRunMode = true;
+    if (!gConnected) {
+      gRunBackoffIndex = 0;
+      gNextRetryMs     = millis() + RUN_BACKOFF_MS[0];
+      gRetryArmed      = true;
+      addKeyLog("[RECON] mode switch CONFIG→RUN, starting backoff");
     }
-
-    addKeyLog("Auto-connect (recent pair) failed");
+  } else {
+    // Switching RUN → CONFIG: cancel any pending retry.
+    gRunMode    = false;
+    gRetryArmed = false;
+    addKeyLog("[RECON] mode switch RUN→CONFIG, cancelling pending retry");
   }
+}
 
-  // Refresh in case a new bond was stored (or the old one deleted) since
-  // the last attempt.
-  refreshPreferredBondedDevice();
-  if (gPreferredBondedAddress.length() == 0) {
-    return; // no bond to connect to
-  }
+// ---------------------------------------------------------------------------
+// resetReconnectState — used by /connect (user action) to force an immediate
+// attempt regardless of mode or pending backoff state.
+// ---------------------------------------------------------------------------
+void resetReconnectState() {
+  gRetryArmed      = false;
+  gRunBackoffIndex = 0;
+  gBootAttemptCount = 0;
+  gNextRetryMs     = 0;
+}
 
-  gLastAutoConnectAttemptMs = millis();
-
-  // Quick 2-second scan to see if the keyboard is currently advertising.
-  // We only attempt connect if the device is visible; trying to connect
-  // to a powered-off keyboard wastes time and disturbs the radio.
+// ---------------------------------------------------------------------------
+// doConnect — perform one connect attempt for the preferred bonded device.
+// ---------------------------------------------------------------------------
+// Scans for 2 s to check if the device is advertising; if found, connects
+// via the advertised target.  If not found, falls through to a direct-address
+// connection attempt (some peripherals stop advertising after bonding).
+// Returns true on success, false on failure.
+static bool doConnect() {
   NimBLEScan* scan = NimBLEDevice::getScan();
   scan->setInterval(80);
   scan->setWindow(40);
@@ -1208,28 +1245,123 @@ void maybeAutoConnectBondedKeyboard() {
     }
   }
 
-  int chosenIdx = preferredByAddrIdx;
-  if (chosenIdx >= 0) {
-    NimBLEAdvertisedDevice d = results.getDevice(chosenIdx);
-    NimBLEAdvertisedDevice* target = new NimBLEAdvertisedDevice(d); // keep a copy beyond scan lifetime
+  if (preferredByAddrIdx >= 0) {
+    NimBLEAdvertisedDevice d = results.getDevice(preferredByAddrIdx);
+    NimBLEAdvertisedDevice* target = new NimBLEAdvertisedDevice(d);
     String found = String(d.getAddress().toString().c_str());
-    String name = d.haveName() ? String(d.getName().c_str()) : gPreferredBondedName;
-
+    String name  = d.haveName() ? String(d.getName().c_str()) : gPreferredBondedName;
     addKeyLog(String("Auto-connecting to bonded keyboard: ") + found);
-    if (!connectToKeyboard(found, name, target)) {
-      addKeyLog("Auto-connect failed");
+    bool ok = connectToKeyboard(found, name, target);
+    if (!ok) addKeyLog("Auto-connect failed");
+    return ok;
+  }
+
+  // Device not found in scan — fall through to direct-address connect.
+  // Some bonded peripherals (e.g. Kobo) stop general advertising after
+  // bonding but still accept a direct-address connection.
+  addKeyLog("Preferred device not in scan, attempting direct connect");
+  bool ok = connectToKeyboard(gPreferredBondedAddress, gPreferredBondedName, nullptr);
+  if (!ok) addKeyLog("Auto-connect (direct) failed");
+  return ok;
+}
+
+// ---------------------------------------------------------------------------
+// maybeAutoConnectBondedKeyboard — called from the main loop
+// ---------------------------------------------------------------------------
+// Implements mode-aware reconnect policy:
+//   CONFIG mode: up to CONFIG_BOOT_MAX_ATTEMPTS at boot (5 s apart), then stop.
+//   RUN mode   : exponential backoff (1/5/15/30/60 s, then 60 s repeating).
+// The post-pair pending-reconnect path is still first-priority in both modes.
+void maybeAutoConnectBondedKeyboard() {
+  if (!gAutoConnectEnabled) {
+    return; // suppressed by /scan handler
+  }
+  if (gConnected) {
+    return; // already connected
+  }
+
+  unsigned long now = millis();
+
+  // ---- Post-pair priority reconnect (mode-agnostic) ----------------------
+  // A freshly paired device gets one immediate attempt regardless of policy.
+  if (gPendingReconnectAddress.length() > 0) {
+    addKeyLog(String("[RECON] post-pair connect: ") + gPendingReconnectAddress);
+    if (connectToKeyboard(gPendingReconnectAddress, gPendingReconnectName)) {
+      gPendingReconnectAddress = "";
+      gPendingReconnectName    = "";
+    } else {
+      addKeyLog("[RECON] post-pair connect failed");
+      gPendingReconnectAddress = "";
+      gPendingReconnectName    = "";
     }
     return;
   }
 
-  // Device not found in scan — some bonded peripherals (e.g. Kobo) stop
-  // general advertising after bonding and will not appear in a scan, but
-  // still accept a direct-address connection.  Try anyway; openKeyboardLink()
-  // has a direct-address fallback that mirrors the manual /connect path.
-  addKeyLog("Preferred device not in scan, attempting direct connect");
-  if (!connectToKeyboard(gPreferredBondedAddress, gPreferredBondedName, nullptr)) {
-    addKeyLog("Auto-connect (direct) failed");
+  // ---- No bond = nothing to connect to -----------------------------------
+  refreshPreferredBondedDevice();
+  if (gPreferredBondedAddress.length() == 0) {
+    return;
   }
+
+  // ---- CONFIG mode -------------------------------------------------------
+  if (!gRunMode) {
+    // Only retry at boot (gDisconnectSeen == false) and only up to the cap.
+    if (gDisconnectSeen) {
+      return; // post-disconnect: no auto-retry in CONFIG mode
+    }
+    if (gBootAttemptCount >= CONFIG_BOOT_MAX_ATTEMPTS) {
+      return; // exhausted boot attempts
+    }
+    // First attempt: gRetryArmed may not be set yet — allow it.
+    if (gBootAttemptCount == 0 && !gRetryArmed) {
+      gRetryArmed  = true;
+      gNextRetryMs = 0; // immediate
+    }
+    if (!gRetryArmed || now < gNextRetryMs) {
+      return;
+    }
+    gBootAttemptCount++;
+    gRetryArmed = false;
+    addKeyLog(String("[RECON] mode=CONFIG trigger=boot attempt=") + String(gBootAttemptCount));
+    bool ok = doConnect();
+    if (!ok && gBootAttemptCount < CONFIG_BOOT_MAX_ATTEMPTS) {
+      // Schedule the next boot attempt.
+      gNextRetryMs = millis() + CONFIG_BOOT_RETRY_GAP_MS;
+      gRetryArmed  = true;
+      addKeyLog(String("[RECON] mode=CONFIG trigger=boot attempt=") +
+                String(gBootAttemptCount + 1) + " (after " + String(CONFIG_BOOT_RETRY_GAP_MS) + "ms)");
+    } else if (!ok) {
+      addKeyLog("[RECON] giving up (CONFIG mode boot exhausted)");
+    }
+    return;
+  }
+
+  // ---- RUN mode ----------------------------------------------------------
+  if (!gRetryArmed) {
+    // Not yet armed: arm for step 0 (happens if module starts in RUN mode
+    // and was never disconnected yet, i.e. very first boot attempt).
+    gRunBackoffIndex = 0;
+    gNextRetryMs     = now + RUN_BACKOFF_MS[0];
+    gRetryArmed      = true;
+    return;
+  }
+  if (now < gNextRetryMs) {
+    return; // not time yet
+  }
+  int step = gRunBackoffIndex < RUN_BACKOFF_COUNT ? gRunBackoffIndex : RUN_BACKOFF_COUNT - 1;
+  addKeyLog(String("[RECON] mode=RUN trigger=disconnect retry_index=") + String(step) +
+            " (after " + String(RUN_BACKOFF_MS[step]) + "ms)");
+  bool ok = doConnect();
+  if (!ok) {
+    // Advance to next backoff step (clamp at last).
+    if (gRunBackoffIndex < RUN_BACKOFF_COUNT - 1) {
+      gRunBackoffIndex++;
+    }
+    int next = gRunBackoffIndex < RUN_BACKOFF_COUNT ? gRunBackoffIndex : RUN_BACKOFF_COUNT - 1;
+    gNextRetryMs = millis() + RUN_BACKOFF_MS[next];
+    gRetryArmed  = true;
+  }
+  // On success, onConnect() resets gRetryArmed and counters.
 }
 
 // ---------------------------------------------------------------------------

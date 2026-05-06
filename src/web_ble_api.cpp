@@ -74,6 +74,9 @@ void registerRoutes(WebServer& server) {
     const String addr = server.arg("addr");
     const String name = server.hasArg("name") ? server.arg("name") : "";
     KeyLog::add(String("HTTP /connect: addr=") + addr + (name.length() ? String(" name=") + name : String("")));
+    // User-initiated connect: override any pending backoff schedule.
+    BLEKeyboard::resetReconnectState();
+    KeyLog::add("[RECON] mode=CONFIG trigger=user");
     const bool   ok   = BLEKeyboard::connectToKeyboard(addr, name);
     KeyLog::add(String("HTTP /connect: ") + (ok ? "ok" : "failed"));
     server.send(200, "application/json",

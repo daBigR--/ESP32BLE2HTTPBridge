@@ -913,6 +913,9 @@ void setup() {
   loadPersistedConfig();
   gConfigMode = determineConfigMode(forceConfigMode);
 
+  // Tell the BLE reconnect controller which policy to apply.
+  BLEKeyboard::setReconnectMode(!gConfigMode);
+
   // Phase 4: mode-specific startup.
   startSelectedMode();
   waitForSerialMonitorAttach();
