@@ -114,7 +114,8 @@ void registerRoutes(WebServer& server) {
   //   address        — BT address of the connected keyboard (or "")
   //   bondedAddress  — preferred bonded keyboard address (used for auto-connect)
   //   bondedName     — display name of the preferred bonded keyboard
-  //   lastKey        — hex string of the most recently received key code
+  //   lastSig        — lowercase hex signature of the most recent burst (or "")
+  //   recentSigs     — JSON array of last 20 burst events
   //   keys           — JSON array of the last 40 log lines (rolling)
   //
   // The web UI polls this endpoint periodically to update its live display.
@@ -126,12 +127,9 @@ void registerRoutes(WebServer& server) {
     out += ",\"address\":\""    + JsonUtil::escape(BLEKeyboard::connectedAddress())        + "\"";
     out += ",\"bondedAddress\":\"" + JsonUtil::escape(BLEKeyboard::preferredBondedAddress()) + "\"";
     out += ",\"bondedName\":\"" + JsonUtil::escape(BLEKeyboard::preferredBondedName())     + "\"";
-    out += ",\"lastKey\":\"";
-    if (BLEKeyboard::lastKeyCode() > 0) {
-      if (BLEKeyboard::lastKeyCode() < 0x10) { out += "0"; } // zero-pad
-      out += String(BLEKeyboard::lastKeyCode(), HEX);
-    }
-    out += "\",\"keys\":" + KeyLog::toJson();
+    out += ",\"lastSig\":\""   + JsonUtil::escape(BLEKeyboard::lastSignature())           + "\"";
+    out += ",\"recentSigs\":"  + BLEKeyboard::recentSigsJson();
+    out += ",\"keys\":" + KeyLog::toJson();
     out += "}";
     server.send(200, "application/json", out);
   });

@@ -15,8 +15,8 @@
 //   GET /config/addwifi      — add or update a WiFi network (?ssid=&pwd=)
 //   GET /config/delwifi      — remove a WiFi network (?ssid=)
 //   GET /config/setsleeptimeout — set inactivity deep-sleep timeout (?ms=)
-//   GET /config/setmapping   — add or update a key→path mapping (?key=&path=)
-//   GET /config/delmapping   — remove a mapping (?key=<hex>)
+//   GET /config/setmapping   — add or update a sig→url mapping (?sig=&url=&label=)
+//   GET /config/delmapping   — remove a mapping (?sig=<hex>)
 //   GET /reboot              — respond 200, then ESP.restart()
 //   GET /factory-reset       — wipe NVS + BLE bonds, then restart
 // =============================================================================
@@ -44,8 +44,8 @@ struct Context {
   // Currently selected URL index in main.cpp.
   uint8_t* selectedUrlIndex;
 
-  // Live key-mapping vector in main.cpp.
-  std::vector<KeyMapping>* keyMappings;
+  // Live button-mapping vector in main.cpp.
+  std::vector<ButtonMapping>* buttonMappings;
 
   // Inactivity timeout (ms) before deep sleep in RUN mode.
   uint32_t* sleepTimeoutMs;

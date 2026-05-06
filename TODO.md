@@ -12,7 +12,7 @@
 
 - [ ] **Mode-aware connection behavior**: differentiate reconnect logic by operating mode.
       - **CONFIG mode**:
-        - (a) At boot, attempt one auto-connect to the most-recently-bonded device.
+        - (a) At boot, attempt auto-connect at most twice to the most-recently-bonded device.
         - (b) After pairing a new device, keep the resulting connection up — do not
               disconnect-then-reconnect.
         - (c) On any subsequent disconnect, do not auto-retry; wait for explicit user

@@ -123,9 +123,9 @@ static uint8_t             gSelectedUrlIndex = 0;
 static std::vector<WifiCredential> gWifiNetworks;
 static WiFiMulti gWifiMulti;
 
-// Table mapping HID key codes to relative URL paths.
-// e.g. keyCode=0x28 (Enter) → "/door/open"
-static std::vector<KeyMapping> gKeyMappings;
+// Table mapping burst signatures to relative URL paths.
+// e.g. signature="037828" → "/door/open"
+static std::vector<ButtonMapping> gButtonMappings;
 
 // Whether the device is currently in CONFIG mode (true) or RUN mode (false).
 // Starts as true; set to false in setup() once a valid config is confirmed.
@@ -250,7 +250,7 @@ static unsigned long gLastActivityMs = 0;
 bool   isConfigButtonHeldOnBoot();
 String mappedPathForKey(uint8_t keyCode);
 void   handleFactoryResetExtras();
-void   onBleKeyPress(uint8_t keyCode);
+void   onBleSigPress(const String& signature);
 void   onHttpGetStart();
 void   onHttpGetResult(int statusCode);
 void   updateStatusLeds();
@@ -302,15 +302,19 @@ bool isConfigButtonHeldOnBoot() {
 }
 
 // ---------------------------------------------------------------------------
-// mappedPathForKey
+// mappedPathForSig
 // ---------------------------------------------------------------------------
-// Looks up the URL path configured for a given HID key code.
-// Returns an empty string if the key has no mapping, which HttpBridge
-// interprets as "do nothing" and silently drops the key event.
-String mappedPathForKey(uint8_t keyCode) {
-  for (const KeyMapping& m : gKeyMappings) {
-    if (m.keyCode == keyCode) {
-      return m.path;
+// Looks up the URL path configured for a given burst signature.
+// Returns an empty string if the signature has no mapping, which HttpBridge
+// interprets as "do nothing" and silently drops the event.
+String mappedPathForSig(const String& signature) {
+  String sigLower = signature;
+  sigLower.toLowerCase();
+  for (const ButtonMapping& m : gButtonMappings) {
+    String mLower = m.signature;
+    mLower.toLowerCase();
+    if (mLower == sigLower) {
+      return m.url;
     }
   }
   return "";
@@ -428,10 +432,10 @@ void handleButton() {
 }
 
 // ---------------------------------------------------------------------------
-// onBleKeyPress — callback registered with BLEKeyboard
+// onBleSigPress — callback registered with BLEKeyboard
 // ---------------------------------------------------------------------------
-// Invoked from the BLE notification path (Core 0) every time a key press
-// is received from the connected HID keyboard.
+// Invoked from the BLE notification path (Core 0) every time a new burst
+// (button press) is received from the connected HID keyboard.
 //
 // It does two things:
 //   1. Arms the D1 double-blink window so the LED task will perform the
@@ -439,17 +443,17 @@ void handleButton() {
 //      subsequent HTTP request takes.  The window covers exactly
 //      BLE_KEY_BLINK_COUNT full off/on cycles.
 //
-//   2. Enqueues the key code in HttpBridge for deferred HTTP dispatch.
-//      HttpBridge::onKeyPress() only queues the code; the actual HTTP GET
-//      happens in processPendingKeys() on the next loop() iteration, keeping
+//   2. Enqueues the burst signature in HttpBridge for deferred HTTP dispatch.
+//      HttpBridge::onSigPress() only queues it; the actual HTTP GET
+//      happens in processPendingSigs() on the next loop() iteration, keeping
 //      the BLE callback fast and non-blocking.
-void onBleKeyPress(uint8_t keyCode) {
+void onBleSigPress(const String& signature) {
   markUserActivity();
   // Record blink window; the LED task will drive the pin.
   unsigned long now = millis();
   gBleLedBlinkStartMs = now;
   gBleLedBlinkEndMs   = now + (BLE_KEY_BLINK_COUNT * (BLE_KEY_BLINK_OFF_MS + BLE_KEY_BLINK_ON_MS));
-  HttpBridge::onKeyPress(keyCode);
+  HttpBridge::onSigPress(signature);
 }
 
 // ---------------------------------------------------------------------------
@@ -733,13 +737,13 @@ void initBleAndHttpStack() {
   NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
 
   // Wire up HTTP bridge callbacks.
-  HttpBridge::begin(KeyLog::add, currentBaseUrl, mappedPathForKey);
+  HttpBridge::begin(KeyLog::add, currentBaseUrl, mappedPathForSig);
 
   // Register HTTP result hooks for LED signaling.
   HttpBridge::setGetCallbacks(onHttpGetStart, onHttpGetResult);
 
-  // Start keyboard module and keypress callback chain.
-  BLEKeyboard::begin(KeyLog::add, onBleKeyPress);
+  // Start keyboard module and sig callback chain.
+  BLEKeyboard::begin(KeyLog::add, onBleSigPress);
 }
 
 // ---------------------------------------------------------------------------
@@ -747,12 +751,12 @@ void initBleAndHttpStack() {
 // ---------------------------------------------------------------------------
 void loadPersistedConfig() {
   // Load persisted config from NVS into runtime state.
-  ConfigStore::load(gWifiNetworks, gBaseUrls, gSelectedUrlIndex, gKeyMappings, gSleepTimeoutMs);
+  ConfigStore::load(gWifiNetworks, gBaseUrls, gSelectedUrlIndex, gButtonMappings, gSleepTimeoutMs);
   KeyLog::add(
     String("Config: wifi=") + String(gWifiNetworks.size()) + String(" net(s)") +
     String(" urls=") + String(gBaseUrls.size()) +
     String(" sel=") + String(gSelectedUrlIndex) +
-    String(" maps=") + String(gKeyMappings.size()) +
+    String(" maps=") + String(gButtonMappings.size()) +
     String(" sleepMs=") + String(gSleepTimeoutMs)
   );
 
@@ -768,7 +772,7 @@ bool determineConfigMode(bool forceConfigMode) {
   bool runConfigReady = ConfigStore::hasValidRunConfig(
     gWifiNetworks,
     gBaseUrls,
-    gKeyMappings,
+    gButtonMappings,
     BLEKeyboard::preferredBondedAddress()
   );
   return forceConfigMode || !runConfigReady;
@@ -792,7 +796,7 @@ void startConfigModeServer() {
     &gWifiNetworks,
     &gBaseUrls,
     &gSelectedUrlIndex,
-    &gKeyMappings,
+    &gButtonMappings,
     &gSleepTimeoutMs,
     KeyLog::add,
     handleFactoryResetExtras
@@ -957,7 +961,7 @@ void loop() {
     // during the network round-trip) but acceptable because key presses
     // are infrequent and the BLE notification callback only queues codes,
     // never blocks.
-    HttpBridge::processPendingKeys();
+    HttpBridge::processPendingSigs();
 
     // Poll the physical button for URL cycling / saving.
     handleButton();

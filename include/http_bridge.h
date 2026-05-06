@@ -1,6 +1,6 @@
 #pragma once
 // =============================================================================
-// http_bridge.h — BLE key-press to HTTP GET forwarding bridge
+// http_bridge.h — BLE burst-signature to HTTP GET forwarding bridge
 // =============================================================================
 //
 // Decouples the time-critical BLE notification callback from the potentially
@@ -14,15 +14,15 @@
 //   cause the keyboard connection to drop.
 //
 // The solution:
-//   onKeyPress()         — non-blocking enqueue called from the BLE callback.
-//   processPendingKeys() — drains the queue and fires HTTP GETs; called from
+//   onSigPress()         — non-blocking enqueue called from the BLE callback.
+//   processPendingSigs() — drains the queue and fires HTTP GETs; called from
 //                           the Arduino main loop, which can safely block.
 //
-// Key-repeat suppression:
-//   onKeyPress() applies a 120 ms window duplicate filter.  If the same key
-//   code arrives within 120 ms of the previous enqueue it is treated as
-//   keyboard auto-repeat and silently dropped.  This prevents a single long
-//   key-hold from flooding the HTTP endpoint with dozens of identical GETs.
+// Burst-repeat suppression:
+//   onSigPress() applies a 120 ms window duplicate filter.  If the same
+//   signature arrives within 120 ms of the previous enqueue it is treated as
+//   a duplicate burst and silently dropped.  This prevents a single long
+//   button-hold from flooding the HTTP endpoint with dozens of identical GETs.
 //
 // Dependency injection:
 //   All "knowledge" this module needs (base URL, path mapping, log function,
@@ -42,9 +42,9 @@ using LogFn = void (*)(const String& line);
 // Queried lazily at dispatch time so URL changes take effect immediately.
 using BaseUrlFn = String (*)();
 
-// Given a HID key code, returns the mapped relative URL path (or empty string
-// if the key has no mapping, in which case the HTTP GET is skipped).
-using MappedPathFn = String (*)(uint8_t keyCode);
+// Function type that maps a burst signature to a relative URL path.
+// Return an empty string if no mapping is found (the press is silently dropped).
+using MappedPathFn = String (*)(const String& signature);
 
 // Optional callback fired just before HTTPClient::GET() is called.
 // Used by main.cpp to arm the D3 network LED start pulse.
@@ -64,15 +64,13 @@ void begin(LogFn logFn, BaseUrlFn baseUrlFn, MappedPathFn mappedPathFn);
 // the LED variables are initialised.
 void setGetCallbacks(GetStartFn getStartFn, GetResultFn getResultFn);
 
-// Enqueue a key press for later HTTP dispatch.  Non-blocking and safe to call
-// from a BLE notification callback or any RTOS task.  If the internal queue
-// is already at its maximum size (24 entries), the oldest entry is evicted to
-// make room.
-void onKeyPress(uint8_t keyCode);
+// Enqueue a burst signature for HTTP dispatch.
+// Call this from the BLE notification callback (or any task).
+// The actual HTTP request is sent from processPendingSigs() in the main loop.
+void onSigPress(const String& signature);
 
-// Drain the pending key queue, applying the repeat filter and firing one
-// HTTP GET per remaining entry.  Must be called from the main loop.
-// Blocks until all pending GETs have completed or timed out.
-void processPendingKeys();
+// Process one pending signature dispatch per call.
+// Call from loop() — does nothing if the queue is empty or WiFi is down.
+void processPendingSigs();
 
 } // namespace HttpBridge

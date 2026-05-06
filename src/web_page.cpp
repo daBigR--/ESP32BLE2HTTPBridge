@@ -164,13 +164,16 @@ const char PAGE[] PROGMEM = R"HTML(
         <div id="baseUrlsList" style="margin-bottom:8px"></div>
       </div>
       <div class="cfg-section">
-        <label class="cfg-label">Assign a Key</label>
+        <label class="cfg-label">Assign a Button</label>
         <div class="row" style="margin-bottom:8px;gap:8px">
-          <button id="captureBtn" onclick="startCapture()">Capture Key</button>
+          <button id="captureBtn" onclick="startCapture()">Capture Burst</button>
           <span class="captured-box" id="capturedKey">&mdash;</span>
         </div>
+        <div class="row" style="gap:8px;margin-bottom:6px">
+          <input type="text" id="mappingUrl" placeholder="/event/1" style="flex:1" />
+          <input type="text" id="mappingLabel" placeholder="Label (optional)" style="flex:1" />
+        </div>
         <div class="row" style="gap:8px">
-          <input type="text" id="mappingPath" placeholder="/event/1" style="flex:1" />
           <button id="assignBtn" onclick="saveMapping()" disabled>Assign</button>
           <button id="mappingCancelBtn" class="alt" onclick="cancelMappingEdit()" style="display:none">Cancel</button>
         </div>
@@ -178,6 +181,11 @@ const char PAGE[] PROGMEM = R"HTML(
       <div class="cfg-section" style="margin-bottom:0">
         <label class="cfg-label">Current Mappings</label>
         <div id="mappingsList"></div>
+      </div>
+      <div class="cfg-section" style="margin-top:22px">
+        <label class="cfg-label">Recent Bursts</label>
+        <div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px">Live feed of the last 20 button presses seen by the device (newest at bottom).</div>
+        <div id="recentBurstsList" style="font-family:monospace;font-size:0.82rem;max-height:180px;overflow-y:auto;background:var(--bg2);padding:8px;border-radius:6px"></div>
       </div>
     </div>
 
@@ -481,10 +489,11 @@ const char PAGE[] PROGMEM = R"HTML(
       }
       el.innerHTML = mappings.map(m =>
         `<div class="mapping-row">
-          <span class="mono" style="min-width:52px">0x${m.key}</span>
-          <span style="flex:1">${m.path}</span>
-          <button class="alt" style="padding:5px 10px;font-size:0.8rem" onclick="beginEditMapping('${m.key}', '${encodeURIComponent(m.path)}')">Edit</button>
-          <button class="warn" style="padding:5px 10px;font-size:0.8rem" onclick="deleteMapping('${m.key}')">Delete</button>
+          <span class="mono" style="min-width:72px">${m.sig}</span>
+          <span style="flex:1">${m.url}</span>
+          <span style="color:var(--muted);font-size:0.85rem;min-width:60px">${m.label || ''}</span>
+          <button class="alt" style="padding:5px 10px;font-size:0.8rem" onclick="beginEditMapping('${m.sig}', '${encodeURIComponent(m.url)}', '${encodeURIComponent(m.label || '')}')" >Edit</button>
+          <button class="warn" style="padding:5px 10px;font-size:0.8rem" onclick="deleteMapping('${m.sig}')">Delete</button>
         </div>`
       ).join('');
     }
@@ -570,28 +579,29 @@ const char PAGE[] PROGMEM = R"HTML(
       document.getElementById('captureBtn').disabled = true;
     }
 
-    function checkCapture(lastKey) {
-      if (!capturing || !lastKey || lastKey === lastSeenKey) return;
+    function checkCapture(lastSig) {
+      if (!capturing || !lastSig || lastSig === lastSeenKey) return;
       capturing = false;
-      capturedKeyHex = lastKey;
-      document.getElementById('capturedKey').textContent = '0x' + lastKey;
+      capturedKeyHex = lastSig;
+      document.getElementById('capturedKey').textContent = lastSig;
       document.getElementById('assignBtn').disabled = false;
-      document.getElementById('captureBtn').textContent = 'Capture Key';
+      document.getElementById('captureBtn').textContent = 'Capture Burst';
       document.getElementById('captureBtn').disabled = false;
     }
 
-    function beginEditMapping(key, encodedPath) {
+    function beginEditMapping(sig, encodedUrl, encodedLabel) {
       capturing = false;
-      capturedKeyHex = key;
-      mappingEditOriginalKey = key;
-      document.getElementById('capturedKey').textContent = '0x' + key;
-      document.getElementById('mappingPath').value = decodeURIComponent(encodedPath);
+      capturedKeyHex = sig;
+      mappingEditOriginalKey = sig;
+      document.getElementById('capturedKey').textContent = sig;
+      document.getElementById('mappingUrl').value = decodeURIComponent(encodedUrl);
+      document.getElementById('mappingLabel').value = decodeURIComponent(encodedLabel || '');
       document.getElementById('assignBtn').disabled = false;
       document.getElementById('assignBtn').textContent = 'Update';
       document.getElementById('mappingCancelBtn').style.display = '';
-      document.getElementById('captureBtn').textContent = 'Capture Key';
+      document.getElementById('captureBtn').textContent = 'Capture Burst';
       document.getElementById('captureBtn').disabled = false;
-      status('Editing mapping 0x' + key);
+      status('Editing mapping ' + sig);
     }
 
     function cancelMappingEdit() {
@@ -599,30 +609,34 @@ const char PAGE[] PROGMEM = R"HTML(
       capturedKeyHex = '';
       mappingEditOriginalKey = '';
       document.getElementById('capturedKey').innerHTML = '&mdash;';
-      document.getElementById('mappingPath').value = '';
+      document.getElementById('mappingUrl').value = '';
+      document.getElementById('mappingLabel').value = '';
       document.getElementById('assignBtn').disabled = true;
       document.getElementById('assignBtn').textContent = 'Assign';
       document.getElementById('mappingCancelBtn').style.display = 'none';
-      document.getElementById('captureBtn').textContent = 'Capture Key';
+      document.getElementById('captureBtn').textContent = 'Capture Burst';
       document.getElementById('captureBtn').disabled = false;
     }
 
     async function saveMapping() {
       if (!capturedKeyHex) return;
-      const path = document.getElementById('mappingPath').value.trim();
-      if (!path) { status('Enter a path first'); return; }
+      const url   = document.getElementById('mappingUrl').value.trim();
+      const label = document.getElementById('mappingLabel').value.trim();
+      if (!url) { status('Enter a URL path first'); return; }
       if (mappingEditOriginalKey && mappingEditOriginalKey !== capturedKeyHex) {
-        await fetch('/config/delmapping?key=' + encodeURIComponent(mappingEditOriginalKey));
+        await fetch('/config/delmapping?sig=' + encodeURIComponent(mappingEditOriginalKey));
       }
-      await fetch('/config/setmapping?key=' + encodeURIComponent(capturedKeyHex) + '&path=' + encodeURIComponent(path));
-      status((mappingEditOriginalKey ? 'Updated ' : 'Mapped ') + '0x' + capturedKeyHex + ' \u2192 ' + path);
+      await fetch('/config/setmapping?sig=' + encodeURIComponent(capturedKeyHex) +
+                  '&url=' + encodeURIComponent(url) +
+                  '&label=' + encodeURIComponent(label));
+      status((mappingEditOriginalKey ? 'Updated ' : 'Mapped ') + capturedKeyHex + ' \u2192 ' + url);
       cancelMappingEdit();
       await loadConfig();
     }
 
-    async function deleteMapping(key) {
-      await fetch('/config/delmapping?key=' + encodeURIComponent(key));
-      if (mappingEditOriginalKey === key) {
+    async function deleteMapping(sig) {
+      await fetch('/config/delmapping?sig=' + encodeURIComponent(sig));
+      if (mappingEditOriginalKey === sig) {
         cancelMappingEdit();
       }
       await loadConfig();
@@ -652,9 +666,17 @@ const char PAGE[] PROGMEM = R"HTML(
       elKeys.innerHTML = (s.keys || []).map(k => `<div>${k}</div>`).join('');
       elKeys.scrollTop = elKeys.scrollHeight;
       renderBondedPanel(s);
-      if (s.lastKey && s.lastKey !== lastSeenKey) {
-        checkCapture(s.lastKey);
-        lastSeenKey = s.lastKey;
+      if (s.lastSig && s.lastSig !== lastSeenKey) {
+        checkCapture(s.lastSig);
+        lastSeenKey = s.lastSig;
+      }
+      // Update Recent Bursts feed.
+      const rb = document.getElementById('recentBurstsList');
+      if (rb && s.recentSigs) {
+        rb.innerHTML = s.recentSigs.map(e =>
+          `<div>${e.sig} &nbsp;<span style="color:var(--muted)">${e.dev || ''}</span> &nbsp;<span style="color:var(--muted);font-size:0.78rem">+${e.ms}ms</span></div>`
+        ).join('');
+        rb.scrollTop = rb.scrollHeight;
       }
     }
 

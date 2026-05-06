@@ -16,8 +16,8 @@
 //   GET /config/delurl      — remove a base URL by index
 //   GET /config/addwifi     — add or update a WiFi network
 //   GET /config/delwifi     — remove a WiFi network by SSID
-//   GET /config/setmapping  — add or update a key→path mapping
-//   GET /config/delmapping  — remove a key mapping by hex key code
+//   GET /config/setmapping  — add or update a sig→url mapping
+//   GET /config/delmapping  — remove a button mapping by hex signature
 //   GET /reboot             — graceful restart
 //   GET /factory-reset      — wipe NVS and restart
 //
@@ -39,7 +39,7 @@ void registerRoutes(WebServer& server, const Context& ctx) {
   server.on("/config", HTTP_GET, [ctx, &server]() {
     server.send(200, "application/json",
       ConfigStore::configJson(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex,
-                              *ctx.keyMappings, *ctx.sleepTimeoutMs));
+                              *ctx.buttonMappings, *ctx.sleepTimeoutMs));
   });
 
   // ---- GET /config/addurl?url=<value> ------------------------------------
@@ -61,7 +61,7 @@ void registerRoutes(WebServer& server, const Context& ctx) {
     }
     ctx.baseUrls->push_back(url);
     ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex,
-              *ctx.keyMappings, *ctx.sleepTimeoutMs);
+              *ctx.buttonMappings, *ctx.sleepTimeoutMs);
     if (ctx.logFn) { ctx.logFn(String("URL added: ") + url); }
     server.send(200, "application/json", "{\"ok\":true}");
   });
@@ -86,7 +86,7 @@ void registerRoutes(WebServer& server, const Context& ctx) {
     }
     (*ctx.baseUrls)[idx] = url;
     ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex,
-              *ctx.keyMappings, *ctx.sleepTimeoutMs);
+              *ctx.buttonMappings, *ctx.sleepTimeoutMs);
     if (ctx.logFn) { ctx.logFn(String("URL updated: index ") + String(idx)); }
     server.send(200, "application/json", "{\"ok\":true}");
   });
@@ -109,7 +109,7 @@ void registerRoutes(WebServer& server, const Context& ctx) {
       *ctx.selectedUrlIndex = 0;
     }
     ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex,
-              *ctx.keyMappings, *ctx.sleepTimeoutMs);
+              *ctx.buttonMappings, *ctx.sleepTimeoutMs);
     if (ctx.logFn) { ctx.logFn(String("URL removed: index ") + String(idx)); }
     server.send(200, "application/json", "{\"ok\":true}");
   });
@@ -128,7 +128,7 @@ void registerRoutes(WebServer& server, const Context& ctx) {
     }
     *ctx.selectedUrlIndex = (uint8_t)idx;
     ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex,
-              *ctx.keyMappings, *ctx.sleepTimeoutMs);
+              *ctx.buttonMappings, *ctx.sleepTimeoutMs);
     if (ctx.logFn) {
       ctx.logFn(String("URL selected: #") + String(*ctx.selectedUrlIndex + 1));
     }
@@ -151,7 +151,7 @@ void registerRoutes(WebServer& server, const Context& ctx) {
       if (net.ssid == ssid) {
         net.password = pwd;
         ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex,
-              *ctx.keyMappings, *ctx.sleepTimeoutMs);
+              *ctx.buttonMappings, *ctx.sleepTimeoutMs);
         if (ctx.logFn) { ctx.logFn(String("WiFi updated: ") + ssid); }
         server.send(200, "application/json", "{\"ok\":true}");
         return;
@@ -160,7 +160,7 @@ void registerRoutes(WebServer& server, const Context& ctx) {
     // New SSID — append it.
     ctx.wifiNetworks->push_back({ssid, pwd});
     ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex,
-              *ctx.keyMappings, *ctx.sleepTimeoutMs);
+              *ctx.buttonMappings, *ctx.sleepTimeoutMs);
     if (ctx.logFn) { ctx.logFn(String("WiFi added: ") + ssid); }
     server.send(200, "application/json", "{\"ok\":true}");
   });
@@ -186,7 +186,7 @@ void registerRoutes(WebServer& server, const Context& ctx) {
       return;
     }
     ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex,
-                      *ctx.keyMappings, *ctx.sleepTimeoutMs);
+                      *ctx.buttonMappings, *ctx.sleepTimeoutMs);
     if (ctx.logFn) { ctx.logFn(String("WiFi removed: ") + ssid); }
     server.send(200, "application/json", "{\"ok\":true}");
   });
@@ -207,7 +207,7 @@ void registerRoutes(WebServer& server, const Context& ctx) {
     }
     *ctx.sleepTimeoutMs = requestedMs;
     ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex,
-                      *ctx.keyMappings, *ctx.sleepTimeoutMs);
+                      *ctx.buttonMappings, *ctx.sleepTimeoutMs);
     if (ctx.logFn) {
       ctx.logFn(String("Sleep timeout: ") + String(*ctx.sleepTimeoutMs) + String(" ms"));
     }
@@ -215,61 +215,61 @@ void registerRoutes(WebServer& server, const Context& ctx) {
       String(*ctx.sleepTimeoutMs) + String("}"));
   });
 
-  // ---- GET /config/setmapping?key=<hex>&path=<value> --------------------
-  // Adds a new key→path mapping or updates the path of an existing one.
-  // The key code is supplied as a hexadecimal string without the 0x prefix,
-  // e.g. "key=28" for the Enter key (USB HID usage 0x28).
+  // ---- GET /config/setmapping?sig=<hex>&url=<value>&label=<value> --------
+  // Adds a new sig→url mapping or updates an existing one.
   server.on("/config/setmapping", HTTP_GET, [ctx, &server]() {
-    if (!server.hasArg("key") || !server.hasArg("path")) {
-      server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing key or path\"}");
+    if (!server.hasArg("sig") || !server.hasArg("url")) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing sig or url\"}");
       return;
     }
-    // strtol with base 16 safely parses hex strings like "28" or "2A".
-    uint8_t code = (uint8_t)strtol(server.arg("key").c_str(), nullptr, 16);
-    String  path = server.arg("path");
-    // Update existing mapping if the key code already has an entry.
-    for (auto& m : *ctx.keyMappings) {
-      if (m.keyCode == code) {
-        m.path = path;
+    String sig   = server.arg("sig");
+    String url   = server.arg("url");
+    String label = server.hasArg("label") ? server.arg("label") : "";
+    sig.toLowerCase();
+    // Update existing mapping if the signature already has an entry.
+    for (auto& m : *ctx.buttonMappings) {
+      if (m.signature == sig) {
+        m.url   = url;
+        m.label = label;
         ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex,
-              *ctx.keyMappings, *ctx.sleepTimeoutMs);
+              *ctx.buttonMappings, *ctx.sleepTimeoutMs);
         server.send(200, "application/json", "{\"ok\":true}");
         return;
       }
     }
-    // New key code — append it.
-    ctx.keyMappings->push_back({code, path});
+    // New signature — append it.
+    ctx.buttonMappings->push_back({sig, url, label});
     ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex,
-              *ctx.keyMappings, *ctx.sleepTimeoutMs);
+              *ctx.buttonMappings, *ctx.sleepTimeoutMs);
     if (ctx.logFn) {
-      ctx.logFn(String("Map 0x") + String(code, HEX) + String(" -> ") + path);
+      ctx.logFn(String("Map ") + sig + String(" -> ") + url);
     }
     server.send(200, "application/json", "{\"ok\":true}");
   });
 
-  // ---- GET /config/delmapping?key=<hex> ----------------------------------
-  // Removes a key mapping by hex key code.  Same erase-remove pattern as
-  // delwifi above.
+  // ---- GET /config/delmapping?sig=<hex> ----------------------------------
+  // Removes a button mapping by signature.
   server.on("/config/delmapping", HTTP_GET, [ctx, &server]() {
-    if (!server.hasArg("key")) {
-      server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing key\"}");
+    if (!server.hasArg("sig")) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing sig\"}");
       return;
     }
-    uint8_t code   = (uint8_t)strtol(server.arg("key").c_str(), nullptr, 16);
-    size_t  before = ctx.keyMappings->size();
-    ctx.keyMappings->erase(
-      std::remove_if(ctx.keyMappings->begin(), ctx.keyMappings->end(),
-        [code](const KeyMapping& m) { return m.keyCode == code; }),
-      ctx.keyMappings->end()
+    String sig = server.arg("sig");
+    sig.toLowerCase();
+    size_t before = ctx.buttonMappings->size();
+    ctx.buttonMappings->erase(
+      std::remove_if(ctx.buttonMappings->begin(), ctx.buttonMappings->end(),
+        [&sig](const ButtonMapping& m) { return m.signature == sig; }),
+      ctx.buttonMappings->end()
     );
-    if (ctx.keyMappings->size() == before) {
-      server.send(200, "application/json", "{\"ok\":false,\"error\":\"key not found\"}");
+    if (ctx.buttonMappings->size() == before) {
+      server.send(200, "application/json", "{\"ok\":false,\"error\":\"sig not found\"}");
       return;
     }
     ConfigStore::save(*ctx.wifiNetworks, *ctx.baseUrls, *ctx.selectedUrlIndex,
-              *ctx.keyMappings, *ctx.sleepTimeoutMs);
+              *ctx.buttonMappings, *ctx.sleepTimeoutMs);
     if (ctx.logFn) {
-      ctx.logFn(String("Del map 0x") + String(code, HEX));
+      ctx.logFn(String("Del map ") + sig);
     }
     server.send(200, "application/json", "{\"ok\":true}");
   });
@@ -293,7 +293,7 @@ void registerRoutes(WebServer& server, const Context& ctx) {
     ConfigStore::clearAll();       // wipe NVS namespace
     ctx.baseUrls->clear();         // clear RAM copies too so they
     ctx.wifiNetworks->clear();     // are not accidentally re-saved
-    ctx.keyMappings->clear();      // before the reboot completes
+    ctx.buttonMappings->clear();      // before the reboot completes
     *ctx.selectedUrlIndex = 0;
     *ctx.sleepTimeoutMs = ConfigStore::DEFAULT_SLEEP_TIMEOUT_MS;
     if (ctx.factoryResetExtrasFn) {

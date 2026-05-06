@@ -63,7 +63,7 @@ namespace ConfigStore {
 void load(std::vector<WifiCredential>& wifiNetworks,
           std::vector<String>&         baseUrls,
           uint8_t&                     selectedUrlIndex,
-          std::vector<KeyMapping>&     keyMappings,
+          std::vector<ButtonMapping>&  buttonMappings,
           uint32_t&                    sleepTimeoutMs) {
   gPrefs.begin("ble_cfg", true); // open read-only
 
@@ -113,17 +113,18 @@ void load(std::vector<WifiCredential>& wifiNetworks,
     }
   }
 
-  // Load key mappings.  Maximum 32 entries; any entry with a zero key code
-  // or empty path is skipped (guards against partially-written NVS data).
-  uint8_t n = gPrefs.getUChar("n_maps", 0);
-  keyMappings.clear();
+  // Load button mappings.  Maximum 32 entries; skip any entry with empty signature or url.
+  uint8_t n = gPrefs.getUChar("n_sigs", 0);
+  buttonMappings.clear();
   for (uint8_t i = 0; i < n && i < 32; i++) {
-    String  kk   = String("k") + String(i); // e.g. "k0"
-    String  pk   = String("p") + String(i); // e.g. "p0"
-    uint8_t code = gPrefs.getUChar(kk.c_str(), 0);
-    String  path = gPrefs.getString(pk.c_str(), "");
-    if (code != 0 && path.length() > 0) {
-      keyMappings.push_back({code, path});
+    String sik   = String("si") + String(i); // e.g. "si0"
+    String suk   = String("su") + String(i); // e.g. "su0"
+    String slk   = String("sl") + String(i); // e.g. "sl0"
+    String sig   = gPrefs.getString(sik.c_str(), "");
+    String url   = gPrefs.getString(suk.c_str(), "");
+    String label = gPrefs.getString(slk.c_str(), "");
+    if (sig.length() > 0 && url.length() > 0) {
+      buttonMappings.push_back({sig, url, label});
     }
   }
 
@@ -142,7 +143,7 @@ void load(std::vector<WifiCredential>& wifiNetworks,
 void save(const std::vector<WifiCredential>& wifiNetworks,
           const std::vector<String>&         baseUrls,
           uint8_t                            selectedUrlIndex,
-          const std::vector<KeyMapping>&     keyMappings,
+          const std::vector<ButtonMapping>&  buttonMappings,
           uint32_t                           sleepTimeoutMs) {
   gPrefs.begin("ble_cfg", false); // open read-write
   gPrefs.putUChar("n_nets", (uint8_t)wifiNetworks.size());
@@ -158,12 +159,14 @@ void save(const std::vector<WifiCredential>& wifiNetworks,
     gPrefs.putString(uk.c_str(), baseUrls[i]);
   }
   gPrefs.putUChar("selurl", selectedUrlIndex);
-  gPrefs.putUChar("n_maps", (uint8_t)keyMappings.size());
-  for (size_t i = 0; i < keyMappings.size() && i < 32; i++) {
-    String kk = String("k") + String(i);
-    String pk = String("p") + String(i);
-    gPrefs.putUChar(kk.c_str(), keyMappings[i].keyCode);
-    gPrefs.putString(pk.c_str(), keyMappings[i].path);
+  gPrefs.putUChar("n_sigs", (uint8_t)buttonMappings.size());
+  for (size_t i = 0; i < buttonMappings.size() && i < 32; i++) {
+    String sik = String("si") + String(i);
+    String suk = String("su") + String(i);
+    String slk = String("sl") + String(i);
+    gPrefs.putString(sik.c_str(), buttonMappings[i].signature);
+    gPrefs.putString(suk.c_str(), buttonMappings[i].url);
+    gPrefs.putString(slk.c_str(), buttonMappings[i].label);
   }
   gPrefs.putUInt("slp_to", clampSleepTimeoutMs(sleepTimeoutMs));
   gPrefs.end();
@@ -188,7 +191,7 @@ String configJson(
   const std::vector<WifiCredential>& wifiNetworks,
   const std::vector<String>& baseUrls,
   uint8_t selectedUrlIndex,
-  const std::vector<KeyMapping>& keyMappings,
+  const std::vector<ButtonMapping>& buttonMappings,
   uint32_t sleepTimeoutMs
 ) {
   String out = "{\"wifiNetworks\":[";
@@ -206,13 +209,11 @@ String configJson(
       ",\"sleepTimeoutMs\":" + String(clampSleepTimeoutMs(sleepTimeoutMs)) +
       ",\"mappings\":[";
 
-  for (size_t i = 0; i < keyMappings.size(); i++) {
+  for (size_t i = 0; i < buttonMappings.size(); i++) {
     if (i > 0) { out += ","; }
-    // Key codes are serialised as zero-padded lowercase hex strings.
-    out += "{\"key\":\"";
-    if (keyMappings[i].keyCode < 0x10) { out += "0"; } // zero-pad
-    out += String(keyMappings[i].keyCode, HEX) +
-           "\",\"path\":\"" + JsonUtil::escape(keyMappings[i].path) + "\"}";
+    out += "{\"sig\":\"" + JsonUtil::escape(buttonMappings[i].signature) +
+           "\",\"url\":\"" + JsonUtil::escape(buttonMappings[i].url) +
+           "\",\"label\":\"" + JsonUtil::escape(buttonMappings[i].label) + "\"}";
   }
   out += "]}";
   return out;
@@ -229,12 +230,12 @@ String configJson(
 bool hasValidRunConfig(
   const std::vector<WifiCredential>& wifiNetworks,
   const std::vector<String>& baseUrls,
-  const std::vector<KeyMapping>& keyMappings,
+  const std::vector<ButtonMapping>& buttonMappings,
   const String& preferredBondedAddress
 ) {
   if (wifiNetworks.empty())                 return false;
   if (baseUrls.empty())                     return false;
-  if (keyMappings.empty())                  return false;
+  if (buttonMappings.empty())               return false;
   if (preferredBondedAddress.length() == 0) return false;
   return true;
 }

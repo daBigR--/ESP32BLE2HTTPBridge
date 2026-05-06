@@ -52,6 +52,8 @@
 
 #include <vector>
 
+#include "json_util.h"
+
 #define HID_SERVICE_UUID      "1812"
 #define HID_INPUT_REPORT_UUID "2A4D"
 
@@ -108,9 +110,23 @@ bool gAutoConnectEnabled = true;
 String gPendingReconnectAddress = "";
 String gPendingReconnectName    = "";
 
-// Last non-zero key code received via HID notification (exposed through
-// lastKeyCode() for the web UI status endpoint).
-uint8_t gLastKeyCode = 0;
+// Last burst signature received via HID notification (exposed through
+// lastSignature() for the web UI status endpoint).
+String gLastSignature = "";
+
+// Recent burst event ring (last 20 events, for the web UI feed).
+// Written from the NimBLE notification task, read from the HTTP server task.
+// No mutex: best-effort UI data only.
+struct SigEntry { String sig; String dev; uint32_t ms; };
+static const size_t MAX_RECENT_SIGS = 20;
+std::vector<SigEntry> gRecentSigs;
+
+// Burst-detection state for the notify handler.
+// A "burst" is the group of notifications a device emits for one physical
+// button press; within-burst gaps are short (observed: 1–52 ms across all
+// tested devices), between-burst gaps are >> BURST_GAP_MS.
+const uint32_t BURST_GAP_MS = 100; // ms; tunable if a device needs adjustment
+uint32_t gLastNotificationMs = 0;  // millis() timestamp of the last notification
 
 // Function pointers injected by begin().  Separated from the module
 // implementation so the caller can supply its own log sink and key handler.
@@ -201,6 +217,20 @@ bool trySecurityUpgradeWithTimeout();
 // We start at byte 2 and forward the first non-zero key code to the
 // registered handler.  Only one code per notification is forwarded to
 // keep the upstream queue simple; chords are rare on a media remote.
+
+// Build a lowercase hex string from a byte array (no separators).
+// e.g. {0x03, 0x7f, 0x7f} -> "037f7f"
+static String bytesToHexString(const uint8_t* data, size_t len) {
+  String s;
+  s.reserve(len * 2);
+  for (size_t i = 0; i < len; i++) {
+    char buf[3];
+    snprintf(buf, sizeof(buf), "%02x", data[i]);
+    s += buf;
+  }
+  return s;
+}
+
 static void notifyCallback(NimBLERemoteCharacteristic* pRemoteCharacteristic,
                            uint8_t* pData,
                            size_t length,
@@ -210,23 +240,35 @@ static void notifyCallback(NimBLERemoteCharacteristic* pRemoteCharacteristic,
     return; // ignore indication ACKs and malformed reports
   }
 
-  for (int i = 2; i < (int)length && i < 8; i++) {
-    if (pData[i] == 0) {
-      continue; // key slot empty
+  uint32_t now = (uint32_t)millis();
+  uint32_t gap = now - gLastNotificationMs;
+  bool isNewBurst = (gLastNotificationMs == 0) || (gap > BURST_GAP_MS);
+  gLastNotificationMs = now;
+
+  String signature = bytesToHexString(pData, length);
+  if (isNewBurst) {
+    addKeyLog(String("[BURST] new burst gap=") + String(gap) + "ms payload=" + signature);
+    gLastSignature = signature;
+    // Add to recent sigs ring.
+    if (gRecentSigs.size() >= MAX_RECENT_SIGS) {
+      gRecentSigs.erase(gRecentSigs.begin());
     }
-    gLastKeyCode = pData[i];
-    addKeyLog("HID notify received"); // DIAG: confirm notifications are arriving
+    gRecentSigs.push_back({signature, gConnectedName, now});
+    // Dispatch to URL layer.
     if (gKeyPressFn) {
-      gKeyPressFn(pData[i]); // call the main application handler
+      gKeyPressFn(signature);
     }
-    // Log as uppercase hex for readability (e.g. "KEY 0x28" = Enter).
-    String line = "KEY 0x";
-    if (pData[i] < 0x10) {
-      line += "0"; // zero-pad single-hex-digit values
+    // Keep KEY 0x... log line for debugging visibility (not used for URL dispatch).
+    for (int i = 2; i < (int)length && i < 8; i++) {
+      if (pData[i] == 0) continue;
+      String line = "KEY 0x";
+      if (pData[i] < 0x10) line += "0";
+      line += String(pData[i], HEX);
+      addKeyLog(line);
+      break;
     }
-    line += String(pData[i], HEX);
-    addKeyLog(line);
-    break; // only forward the first key in the report
+  } else {
+    addKeyLog(String("[BURST] mid-burst gap=") + String(gap) + "ms payload=" + signature);
   }
 }
 
@@ -239,6 +281,8 @@ class ClientCallbacks : public NimBLEClientCallbacks {
   void onConnect(NimBLEClient* pClient) override {
     (void)pClient;
     gConnected = true;
+    gLastNotificationMs = 0; // reset burst state on each new connection
+    gLastSignature = "";     // reset last sig so UI doesn't show stale data
     addKeyLog("Connected");
   }
 
@@ -247,6 +291,8 @@ class ClientCallbacks : public NimBLEClientCallbacks {
   void onDisconnect(NimBLEClient* pClient, int reason) override {
     (void)pClient;
     gConnected = false;
+    gLastNotificationMs = 0; // reset burst state on disconnect
+    gLastSignature = "";     // reset last sig on disconnect
     gLastDisconnectReason = (uint8_t)(reason & 0xFF);
     addKeyLog(String("Disconnected reason=0x") + String(gLastDisconnectReason, HEX));
   }
@@ -1202,6 +1248,20 @@ void syncConnectionState() {
 bool          isConnected()     { return gConnected;        }
 const String& connectedName()   { return gConnectedName;    }
 const String& connectedAddress(){ return gConnectedAddress; }
-uint8_t       lastKeyCode()     { return gLastKeyCode;       }
+const String& lastSignature()   { return gLastSignature;    }
+
+// Returns a JSON array of the last 20 burst events, oldest-to-newest.
+// Format: [{"sig":"...","dev":"...","ms":12345}, ...]
+String recentSigsJson() {
+  String out = "[";
+  for (size_t i = 0; i < gRecentSigs.size(); i++) {
+    if (i > 0) out += ",";
+    out += "{\"sig\":\""  + JsonUtil::escape(gRecentSigs[i].sig) +
+           "\",\"dev\":\"" + JsonUtil::escape(gRecentSigs[i].dev) +
+           "\",\"ms\":"   + String(gRecentSigs[i].ms) + "}";
+  }
+  out += "]";
+  return out;
+}
 
 } // namespace BLEKeyboard

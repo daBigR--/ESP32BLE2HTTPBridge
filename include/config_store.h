@@ -17,9 +17,10 @@
 //   "n_nets"        — count of stored WiFi credentials (uint8)
 //   "ns<i>"         — SSID of WiFi network i        (string, i = 0..n_nets-1)
 //   "np<i>"         — password of WiFi network i    (string, i = 0..n_nets-1)
-//   "n_maps"        — count of stored key mappings  (uint8)
-//   "k<i>"          — key code of mapping i          (uint8, i = 0..n_maps-1)
-//   "p<i>"          — path of mapping i              (string, i = 0..n_maps-1)
+//   "n_sigs"        — count of stored button mappings (uint8)
+//   "si<i>"         — signature of mapping i         (string, i = 0..n_sigs-1)
+//   "su<i>"         — url of mapping i               (string, i = 0..n_sigs-1)
+//   "sl<i>"         — label of mapping i             (string, i = 0..n_sigs-1)
 //   "slp_to"        — inactivity timeout for deep sleep (uint32, ms)
 //
 // Migration from old single-URL format:
@@ -34,7 +35,7 @@
 // Design limits:
 //   Max 8 WiFi credentials (WiFiMulti supports up to ~10; 8 is a safe budget)
 //   Max 8 base URLs
-//   Max 32 key mappings (well above any practical use case)
+//   Max 32 button mappings (well above any practical use case)
 // =============================================================================
 
 #include <Arduino.h>
@@ -48,12 +49,13 @@ struct WifiCredential {
   String password;  // WPA2 passphrase, or empty string for an open network
 };
 
-// Maps one HID usage-page key code to a relative URL path.
-// When that key is pressed in RUN mode the device fires:
-//   HTTP GET <baseUrl>/<path>
-struct KeyMapping {
-  uint8_t keyCode;  // USB HID keyboard usage code, e.g. 0x28 = Enter
-  String  path;     // Relative path appended to baseUrl, e.g. "/lights/toggle"
+// Maps one HID burst signature to a URL path.
+// When a button with that signature is pressed in RUN mode the device fires:
+//   HTTP GET <baseUrl>/<url>
+struct ButtonMapping {
+  String signature; // lowercase hex of the HID payload, e.g. "037828"
+  String url;       // relative path appended to baseUrl, e.g. "/lights/toggle"
+  String label;     // optional human-readable name; shown in UI instead of signature
 };
 
 namespace ConfigStore {
@@ -73,7 +75,7 @@ static const uint32_t MAX_SLEEP_TIMEOUT_MS     = 24UL * 60UL * 60UL * 1000UL;
 void load(std::vector<WifiCredential>& wifiNetworks,
           std::vector<String>&         baseUrls,
           uint8_t&                     selectedUrlIndex,
-          std::vector<KeyMapping>&     keyMappings,
+          std::vector<ButtonMapping>&  buttonMappings,
           uint32_t&                    sleepTimeoutMs);
 
 // Write the current in-RAM configuration to NVS, overwriting any previous
@@ -82,7 +84,7 @@ void load(std::vector<WifiCredential>& wifiNetworks,
 void save(const std::vector<WifiCredential>& wifiNetworks,
           const std::vector<String>&         baseUrls,
           uint8_t                            selectedUrlIndex,
-          const std::vector<KeyMapping>&     keyMappings,
+          const std::vector<ButtonMapping>&  buttonMappings,
           uint32_t                           sleepTimeoutMs);
 
 // Persist only the selected URL index — lightweight NVS write called by the
@@ -92,25 +94,25 @@ void saveSelectedUrlIndex(uint8_t index);
 // Serialise configuration to a JSON object string:
 //   { "wifiNetworks": [{"ssid":"..."},...],
 //     "baseUrls": ["...", ...], "selectedUrlIndex": N,
-//     "mappings": [{"key":"xx","path":"..."},...] }
+//     "mappings": [{"sig":"...","url":"...","label":"..."},...] }
 // Passwords are intentionally omitted from the output.
 String configJson(
   const std::vector<WifiCredential>& wifiNetworks,
   const std::vector<String>&         baseUrls,
   uint8_t                            selectedUrlIndex,
-  const std::vector<KeyMapping>&     keyMappings,
+  const std::vector<ButtonMapping>&  buttonMappings,
   uint32_t                           sleepTimeoutMs
 );
 
 // Returns true when all conditions required for RUN mode are satisfied:
 //   1. wifiNetworks is non-empty (at least one network to connect to).
 //   2. baseUrls is non-empty (has at least one destination for HTTP GETs).
-//   3. keyMappings is non-empty (at least one key configured to trigger an event).
+//   3. buttonMappings is non-empty (at least one button configured to trigger an event).
 //   4. preferredBondedAddress is non-empty (a keyboard has been paired).
 bool hasValidRunConfig(
   const std::vector<WifiCredential>& wifiNetworks,
   const std::vector<String>&         baseUrls,
-  const std::vector<KeyMapping>&     keyMappings,
+  const std::vector<ButtonMapping>&  buttonMappings,
   const String&                      preferredBondedAddress
 );
 

@@ -39,9 +39,10 @@ namespace BLEKeyboard {
 // pass it to KeyLog::add() or Serial.println().
 using LogFn = void (*)(const String& line);
 
-// Callback type invoked on every key press.  Receives the raw HID usage-page
-// key code.  Must return quickly — use a queue for any blocking work.
-using KeyPressFn = void (*)(uint8_t keyCode);
+// Callback type invoked on every new burst (one physical button press).
+// Receives the lowercase hex signature of the first notification's payload.
+// Must return quickly — use a queue for any blocking work.
+using KeyPressFn = void (*)(const String& signature);
 
 // Initialise internal state and store the callbacks.  Must be called once in
 // setup(), after NimBLEDevice::init() has been called by the caller.
@@ -121,8 +122,13 @@ const String& connectedName();
 // Bluetooth address of the currently connected keyboard, or empty string if none.
 const String& connectedAddress();
 
-// Most recently received HID usage-page key code.  Returns 0 if no key has
-// been pressed since the last connection was established.
-uint8_t lastKeyCode();
+// Most recently received burst signature (full payload hex string).
+// Returns an empty string if no burst has been received since last connection.
+const String& lastSignature();
+
+// JSON array of the last 20 burst events:
+//   [{"sig":"...","dev":"...","ms":12345}, ...]
+// Ordered oldest-to-newest.  Best-effort; no mutex.
+String recentSigsJson();
 
 } // namespace BLEKeyboard
