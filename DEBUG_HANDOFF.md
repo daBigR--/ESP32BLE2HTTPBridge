@@ -80,3 +80,27 @@ No device-specific BLE branches remain
 - Scope of this note: UI display polish only; BLE connection behavior is functioning for Boox.
 - Scan list UX: keep the "Other Devices" section collapsed by default and expand only when the user explicitly opens it.
 - Add battery monitoring via an ADC voltage divider so the firmware can report battery level and support low-battery behavior.
+
+## Pairing Regression Recovery — Kobo rc=574 Incident (2026-05-06)
+
+**What happened**: Phase 1 burst-detection was flashed. After that, Kobo Remote
+failed to pair with rc=574 on every connect attempt.
+
+**Recovery steps that fixed it** (all three were required):
+
+    git reset --hard v1-stable-all-devices-validated
+    pio run -t clean
+    pio run -t erase
+    pio run -t upload
+
+**Why `erase` was required**: A plain reflash does not touch NVS. NimBLE stores
+bond LTKs and IRKs in NVS and they survive a firmware overwrite. After the Phase 1
+flash, the ESP32's NVS bond store contained an entry associated with the Phase 1
+firmware session. The Kobo remote also had a stale bond record. Neither side could
+resolve the mismatch, producing rc=574 (HCI Connection Failed to be Established)
+at the controller level. `pio run -t erase` wipes the entire flash including NVS,
+forcing a clean bond negotiation on next pair.
+
+**Lesson**: After any firmware regression that touches pairing or BLE stack
+initialization, always `erase` flash before the recovery reflash. A rebuild + clean
++ reflash alone is not sufficient if bond state is corrupted.
