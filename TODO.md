@@ -35,11 +35,6 @@
 - [ ] Delete `BLEPairBasicDiagnostic/` and `BLEPairBasicDiagnosticBaseline/` directories —
       these were temporary debugging aids and are no longer needed.
 
-- [ ] Revert DIAG stay-connected-after-pair scaffold: remove the `subscribeToKeyboard()`
-      call inside `pairKeyboard()` and restore the original disconnect-after-pair
-      behavior. The DIAG was used to confirm the first encrypted session works;
-      it's no longer needed now that auto-reconnect is fixed.
-
 ## Firmware
 
 - [ ] Battery monitoring: add ADC voltage divider circuit so firmware can read and
