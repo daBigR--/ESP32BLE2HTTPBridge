@@ -257,6 +257,7 @@ void   updateStatusLeds();
 void   cycleUrl();
 void   saveSelectedUrl();
 void   handleButton();
+void   handleConfigButton();
 void   markUserActivity();
 bool   isRunningOnBattery();
 void   maybeEnterDeepSleep();
@@ -383,6 +384,30 @@ void saveSelectedUrl() {
 // URL_BTN_DOUBLE_WINDOW_MS for a second press.  If it arrives → double press.
 // If the window expires first → single press.  This means single-press actions
 // are delayed by up to DOUBLE_WIN ms, which is imperceptible in practice.
+// ---------------------------------------------------------------------------
+// handleConfigButton — CONFIG mode button handler
+// ---------------------------------------------------------------------------
+// A short press (debounced, released before URL_BTN_LONG_PRESS_MS) reboots
+// the device.  With a complete NVS config the reboot lands in RUN mode.
+void handleConfigButton() {
+  bool pressed = (digitalRead(RUNTIME_BUTTON_PIN) == LOW);
+  static unsigned long sPressMs = 0;
+  static bool          sArmed   = false;
+
+  if (pressed && !sArmed) {
+    sArmed   = true;
+    sPressMs = millis();
+  } else if (!pressed && sArmed) {
+    unsigned long held = millis() - sPressMs;
+    sArmed = false;
+    if (held >= URL_BTN_DEBOUNCE_MS && held < URL_BTN_LONG_PRESS_MS) {
+      KeyLog::add("Config button: rebooting to RUN mode");
+      delay(500);
+      esp_restart();
+    }
+  }
+}
+
 void handleButton() {
   bool pressed = (digitalRead(RUNTIME_BUTTON_PIN) == LOW);
   unsigned long now = millis();
@@ -937,6 +962,7 @@ void loop() {
   // on the browser side.
   if (gConfigMode) {
     server.handleClient();
+    handleConfigButton();
   }
 
   // Detect phantom-connected state: NimBLE's gConnected flag can lag behind

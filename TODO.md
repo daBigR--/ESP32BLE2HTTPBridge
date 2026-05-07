@@ -53,7 +53,6 @@
       stored bonds and update auto-reconnect logic to know which device to favor
       (e.g. last used, user-set priority, or first seen in scan).
 
-- [ ] **Config-mode button behavior**: D10 is currently ignored during CONFIG mode runtime.
-      - Short press → switch to RUN mode immediately (without reboot if possible).
-      - Long press (≥800 ms) → reboot.
-      - RUN-mode button behavior (short = cycle URL, long = save/sleep) stays unchanged.
+- [x] **Config-mode button behavior**: D10 is currently ignored during CONFIG mode runtime.
+      - Short press → reboot (lands in RUN mode when config is complete).
+      - RUN-mode button behavior (short = cycle URL, double = save) stays unchanged.
