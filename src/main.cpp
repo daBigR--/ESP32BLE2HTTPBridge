@@ -389,6 +389,12 @@ void saveSelectedUrl() {
 // ---------------------------------------------------------------------------
 // A short press (debounced, released before URL_BTN_LONG_PRESS_MS) reboots
 // the device.  With a complete NVS config the reboot lands in RUN mode.
+//
+// Known edge case: if the user held D10 for ≥800 ms to force CONFIG mode at
+// boot, the button may still be held when loop() first calls this function.
+// sArmed would then fire on the tail-end release, causing a spurious reboot.
+// A one-time "wait for button release" guard on first call would fix this;
+// not implemented yet as it has not been observed in practice.
 void handleConfigButton() {
   bool pressed = (digitalRead(RUNTIME_BUTTON_PIN) == LOW);
   static unsigned long sPressMs = 0;

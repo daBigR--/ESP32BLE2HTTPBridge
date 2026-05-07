@@ -56,3 +56,11 @@
 - [x] **Config-mode button behavior**: D10 is currently ignored during CONFIG mode runtime.
       - Short press → reboot (lands in RUN mode when config is complete).
       - RUN-mode button behavior (short = cycle URL, double = save) stays unchanged.
+
+## Maybes
+
+- **Config-mode button ghost-trigger**: if the user holds D10 long enough to
+      force CONFIG mode at boot, the button may still be held when `loop()` starts.
+      `handleConfigButton()` would then arm on that tail-end of the press and fire
+      a spurious reboot on release. A one-time "wait for release" guard at first
+      call would fix this. Not observed in practice yet — revisit if it surfaces.
