@@ -52,6 +52,7 @@
 
 #include <vector>
 
+#include "config_store.h"
 #include "json_util.h"
 
 #define HID_SERVICE_UUID      "1812"
@@ -925,7 +926,11 @@ bool isAdvertisedAsPairingMode(NimBLEAdvertisedDevice& d) {
 // unpaired, paired a new keyboard, or the bond was deleted by a factory reset.
 void refreshPreferredBondedDevice() {
   if (gPreferredBondedAddress.length() > 0 && isBondedAddress(gPreferredBondedAddress)) {
-    return; // existing preference is still valid
+    // Existing preference is still valid; restore name from NVS if not in RAM.
+    if (gPreferredBondedName.length() == 0) {
+      gPreferredBondedName = ConfigStore::loadBondedName();
+    }
+    return;
   }
   // Preference lost — reset and repopulate from bond store.
   gPreferredBondedAddress = "";
@@ -936,6 +941,7 @@ void refreshPreferredBondedDevice() {
   }
   NimBLEAddress addr = NimBLEDevice::getBondedAddress(0); // use first bond
   gPreferredBondedAddress = String(addr.toString().c_str());
+  gPreferredBondedName    = ConfigStore::loadBondedName();
 }
 
 // Simple read-only accessors for the preferred bond — used by the web UI
@@ -948,6 +954,7 @@ const String& preferredBondedName()    { return gPreferredBondedName;    }
 void clearPreferredBondedDevice() {
   gPreferredBondedAddress = "";
   gPreferredBondedName    = "";
+  ConfigStore::saveBondedName("");
 }
 
 // ---------------------------------------------------------------------------
@@ -971,6 +978,7 @@ bool pairKeyboard(const String& address, const String& nameHint) {
     // Device is already bonded — just adopt it as the preferred device.
     gPreferredBondedAddress = address;
     gPreferredBondedName    = nameHint;
+    ConfigStore::saveBondedName(nameHint);
     pruneBondsExcept(gPreferredBondedAddress);
     gPendingReconnectAddress = gPreferredBondedAddress;
     gPendingReconnectName    = gPreferredBondedName;
@@ -1045,6 +1053,7 @@ bool pairKeyboard(const String& address, const String& nameHint) {
 
   gPreferredBondedAddress = preferredAddress;
   gPreferredBondedName    = nameHint;
+  ConfigStore::saveBondedName(nameHint);
   pruneBondsExcept(gPreferredBondedAddress);
   gPendingReconnectAddress = gPreferredBondedAddress;
   gPendingReconnectName    = nameHint;
@@ -1093,6 +1102,7 @@ bool unpairKeyboard(const String& address) {
   if (gPreferredBondedAddress.equalsIgnoreCase(address)) {
     gPreferredBondedAddress = "";
     gPreferredBondedName    = "";
+    ConfigStore::saveBondedName("");
   }
   refreshPreferredBondedDevice(); // adopt next available bond, if any
   return true;
@@ -1151,6 +1161,7 @@ bool connectToKeyboard(const String& address, const String& nameHint, NimBLEAdve
 
   gPreferredBondedAddress = address;
   gPreferredBondedName    = nameHint;
+  ConfigStore::saveBondedName(nameHint);
   logConnectionSecurity("Ready to use");
   return true;
 }

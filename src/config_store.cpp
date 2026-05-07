@@ -182,6 +182,22 @@ void saveSelectedUrlIndex(uint8_t index) {
 }
 
 // ---------------------------------------------------------------------------
+// saveBondedName / loadBondedName — persist the bonded keyboard display name
+// ---------------------------------------------------------------------------
+void saveBondedName(const String& name) {
+  gPrefs.begin("ble_cfg", false);
+  gPrefs.putString("bondedName", name);
+  gPrefs.end();
+}
+
+String loadBondedName() {
+  gPrefs.begin("ble_cfg", true);
+  String name = gPrefs.getString("bondedName", "");
+  gPrefs.end();
+  return name;
+}
+
+// ---------------------------------------------------------------------------
 // configJson — serialise configuration to JSON for the web UI
 // ---------------------------------------------------------------------------
 // Hand-built JSON avoids pulling in a JSON library.  JsonUtil::escape() is

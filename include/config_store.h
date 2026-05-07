@@ -91,6 +91,11 @@ void save(const std::vector<WifiCredential>& wifiNetworks,
 // physical button long-press handler so we avoid rewriting all config.
 void saveSelectedUrlIndex(uint8_t index);
 
+// Persist / retrieve the display name of the preferred bonded keyboard.
+// Pass an empty string to saveBondedName() to clear the stored name.
+void saveBondedName(const String& name);
+String loadBondedName();
+
 // Serialise configuration to a JSON object string:
 //   { "wifiNetworks": [{"ssid":"..."},...],
 //     "baseUrls": ["...", ...], "selectedUrlIndex": N,

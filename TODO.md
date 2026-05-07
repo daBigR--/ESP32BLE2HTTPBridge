@@ -33,7 +33,7 @@
 
 ## UI Polish
 
-- [ ] Bonded-device panel: show device name when available, not only MAC address.
+- [x] Bonded-device panel: show device name when available, not only MAC address.
       (Observed: Boox connected successfully but bonded panel showed MAC-only.)
 
 - [x] Scan list: collapse "Other Devices" section by default; expand only on user tap.
