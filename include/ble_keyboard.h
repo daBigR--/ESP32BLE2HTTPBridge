@@ -99,7 +99,7 @@ void disconnectKeyboard();
 
 // Called from the main loop once per iteration.  Implements mode-aware
 // reconnect policy: CONFIG mode caps at 2 boot attempts; RUN mode uses
-// exponential backoff (1/5/15/30/60 s).
+// exponential backoff (1/5/15/30 s, then 30 s repeating).
 void maybeAutoConnectBondedKeyboard();
 
 // Enable or disable the auto-connect loop.  Pass false when a web UI scan is

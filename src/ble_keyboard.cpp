@@ -95,7 +95,7 @@ String gPreferredBondedName    = "";
 // Reconnect policy constants
 // ---------------------------------------------------------------------------
 // RUN mode: exponential-ish backoff steps (ms).  Clamped at the last value.
-static const uint32_t RUN_BACKOFF_MS[]      = {1000, 5000, 15000, 30000, 60000};
+static const uint32_t RUN_BACKOFF_MS[]      = {1000, 5000, 15000, 30000};
 static const int      RUN_BACKOFF_COUNT     = (int)(sizeof(RUN_BACKOFF_MS) / sizeof(RUN_BACKOFF_MS[0]));
 // CONFIG mode: at most 2 boot attempts, 5 s apart.  After that, wait for user.
 static const uint32_t CONFIG_BOOT_RETRY_GAP_MS  = 5000;
