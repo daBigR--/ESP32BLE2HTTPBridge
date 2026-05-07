@@ -835,8 +835,7 @@ bool openKeyboardLink(const String& address, const String& nameHint, bool useFre
   if (!ok) {
     // Fallback: the device was not seen in the scan (may be in directed
     // advertising or just powering up), or connect(target) failed.
-    // First try NimBLE's generic address constructor (historically the most
-    // compatible path), then explicit RANDOM/PUBLIC address types.
+    // Try NimBLE's generic address constructor as a last attempt.
     if (!target) {
       addKeyLog("Device not found in fresh scan, trying direct address fallback");
     }
@@ -844,23 +843,7 @@ bool openKeyboardLink(const String& address, const String& nameHint, bool useFre
     addKeyLog("Trying direct address generic");
     ok = gClient->connect(NimBLEAddress(address.c_str()), false);
     if (!ok) {
-      addKeyLog(String("Direct generic failed rc=") + String(gClient->getLastError()) + String("; trying BLE_ADDR_RANDOM"));
-      ok = gClient->connect(NimBLEAddress(address.c_str(), BLE_ADDR_RANDOM), false);
-    }
-    if (!ok) {
-      addKeyLog(String("BLE_ADDR_RANDOM failed rc=") + String(gClient->getLastError()) + String("; trying BLE_ADDR_PUBLIC"));
-      ok = gClient->connect(NimBLEAddress(address.c_str(), BLE_ADDR_PUBLIC), false);
-      if (!ok) {
-        addKeyLog(String("BLE_ADDR_PUBLIC failed rc=") + String(gClient->getLastError()) + String("; trying BLE_ADDR_RANDOM_ID"));
-        ok = gClient->connect(NimBLEAddress(address.c_str(), BLE_ADDR_RANDOM_ID), false);
-      }
-      if (!ok) {
-        addKeyLog(String("BLE_ADDR_RANDOM_ID failed rc=") + String(gClient->getLastError()) + String("; trying BLE_ADDR_PUBLIC_ID"));
-        ok = gClient->connect(NimBLEAddress(address.c_str(), BLE_ADDR_PUBLIC_ID), false);
-      }
-      if (!ok) {
-        addKeyLog(String("BLE_ADDR_PUBLIC_ID failed rc=") + String(gClient->getLastError()));
-      }
+      addKeyLog("connect failed: scan miss + direct address timeout");
     }
   }
 

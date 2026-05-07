@@ -23,7 +23,7 @@
       Eliminates UI intrusion in config mode while preserving transparent recovery
       in run mode.
 
-- [ ] **Remove dead address-type fallback ladder in connect path**: after the existing
+- [x] **Remove dead address-type fallback ladder in connect path**: after the existing
       "scan-record connect" and "direct address generic" attempts, the code currently
       cycles through BLE_ADDR_RANDOM, BLE_ADDR_PUBLIC, BLE_ADDR_RANDOM_ID, and
       BLE_ADDR_PUBLIC_ID. These have never produced a successful connection in any test
