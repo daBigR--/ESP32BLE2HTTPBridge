@@ -64,6 +64,9 @@
 - [x] **Unify button labels**: change add, save timeout, add irl, assign, etc labels to make them consistent,
       arrange carefully so context allows clear understanding of action.
 
+- [x] **Make sure all logs visible in UI**: make sure ALL info currently being displayed as serial
+      output is also shown on the log text in System tab.
+
 - [ ] ***Add test mode in config**: allow the user to press buttons and send them to the configured
       url + action mappings without exiting config mode.  Requires complete configuration: ssid/pwd, base URL, at least one action map and keyboard connected.  Then switching mode to AP + STA.  Also a special secttion to show status of test and exit from test option.
 
@@ -76,9 +79,6 @@
 	  enters key to pair that event with.  Instead of parsing on the ESP32, have the ESP32
 	  act as a CORS proxy — fetch the KOReader page and forward it to the browser. Then
 	  JavaScript in your config UI does the parsing.
-
-- [ ] **Make sure all logs visible in UI**: make sure ALL info currently being displayed as serial
-      output is also shown on the log text in System tab.
 
 - [ ] **Add scan available networks**: for initial SSID entry so you don't have to enter manually
 

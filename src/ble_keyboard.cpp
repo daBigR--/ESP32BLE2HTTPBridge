@@ -137,11 +137,11 @@ String gPendingReconnectName    = "";
 // lastSignature() for the web UI status endpoint).
 String gLastSignature = "";
 
-// Recent burst event ring (last 20 events, for the web UI feed).
+// Recent burst event ring (last 10 events, for the web UI feed).
 // Written from the NimBLE notification task, read from the HTTP server task.
 // No mutex: best-effort UI data only.
 struct SigEntry { String sig; String dev; uint32_t ms; };
-static const size_t MAX_RECENT_SIGS = 20;
+static const size_t MAX_RECENT_SIGS = 10;
 std::vector<SigEntry> gRecentSigs;
 
 // Burst-detection state for the notify handler.

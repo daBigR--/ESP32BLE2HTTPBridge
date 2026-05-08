@@ -118,7 +118,7 @@ void registerRoutes(WebServer& server) {
   //   bondedAddress  — preferred bonded keyboard address (used for auto-connect)
   //   bondedName     — display name of the preferred bonded keyboard
   //   lastSig        — lowercase hex signature of the most recent burst (or "")
-  //   recentSigs     — JSON array of last 20 burst events
+  //   recentSigs     — JSON array of last 10 burst events
   //   keys           — JSON array of the last 40 log lines (rolling)
   //
   // The web UI polls this endpoint periodically to update its live display.

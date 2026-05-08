@@ -452,11 +452,11 @@ const char PAGE[] PROGMEM = R"HTML(
       </div>
       <div class="card">
         <h2>Recent Bursts</h2>
-        <div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px">Live feed of the last 20 button presses seen by the device (newest at bottom).</div>
+        <div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px">Live feed of the last 10 button presses seen by the device (newest at bottom).</div>
         <div id="recentBurstsList" style="font-family:monospace;font-size:0.82rem;max-height:180px;overflow-y:auto;background:#f8faf9;padding:8px;border-radius:6px;border:1px solid var(--line)"></div>
       </div>
       <div class="card">
-        <h2>Pressed Keys</h2>
+        <h2>Log</h2>
         <div id="keys" class="log"></div>
       </div>
     </div>

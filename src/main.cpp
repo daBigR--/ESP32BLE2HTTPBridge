@@ -840,6 +840,8 @@ void startConfigModeServer() {
   Serial.println(powerSourceToText());
   Serial.print("Open GUI at: http://");
   Serial.println(WiFi.softAPIP()); // typically 192.168.4.1
+  KeyLog::add("Mode: CONFIG");
+  KeyLog::add(String("AP: http://") + WiFi.softAPIP().toString());
   KeyLog::add("GUI ready");
   KeyLog::add(String("Power source: ") + powerSourceToText());
 }
@@ -912,6 +914,9 @@ void printLateStartupSummary() {
     Serial.println(AP_SSID);
     Serial.print("Open GUI at: http://");
     Serial.println(WiFi.softAPIP());
+    KeyLog::add(String("Startup: ") + (gConfigMode ? "CONFIG" : "RUN") + " mode");
+    KeyLog::add(String("AP SSID: ") + AP_SSID);
+    KeyLog::add(String("UI: http://") + WiFi.softAPIP().toString());
   } else {
     Serial.print("WiFi status: ");
     Serial.println(WiFi.status() == WL_CONNECTED ? "connected" : "not connected yet");
