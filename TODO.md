@@ -66,9 +66,19 @@
 
 - [x] **Make sure all logs visible in UI**: make sure ALL info currently being displayed as serial
       output is also shown on the log text in System tab.
+	  
+- [ ] **Move timeout to system**: and rename tabs General to WiFi, BLE to Bluetooth.
 
-- [ ] ***Add test mode in config**: allow the user to press buttons and send them to the configured
-      url + action mappings without exiting config mode.  Requires complete configuration: ssid/pwd, base URL, at least one action map and keyboard connected.  Then switching mode to AP + STA.  Also a special secttion to show status of test and exit from test option.
+- [ ] **Add scan available networks**: for initial SSID entry so you don't have to enter manually.
+      keep manual entry?
+
+- [ ] **Collapse scan lists after selection**:both wifi and ble once ssid selected or device paired
+      collapse or delete the list only show again on new scan
+
+- [ ] **Add test mode in config**: allow the user to press buttons and send them to the configured
+      url + action mappings without exiting config mode.  Requires complete configuration:
+	  ssid/pwd, paired device, base URL and at least one action map.  Then switching mode
+	  to AP + STA.  Also a special section to show status of test and exit from test option.
 
 - [ ] **Add read-parse /koreader/event page**: besides the user being able to enter 
       an event name directly, implement parsing of KOReader HTTP Inspector page and show
@@ -80,9 +90,9 @@
 	  act as a CORS proxy — fetch the KOReader page and forward it to the browser. Then
 	  JavaScript in your config UI does the parsing.
 
-- [ ] **Add scan available networks**: for initial SSID entry so you don't have to enter manually
-
 ## Cleanup / Tech Debt
+
+- [ ] **Update README**: re write readme.md with current project situation. 
 
 - [x] Delete `BLEPairBasicDiagnostic/` and `BLEPairBasicDiagnosticBaseline/` directories —
       these were temporary debugging aids and are no longer needed.
@@ -114,3 +124,5 @@
 
 - [ ] **Per-mapping** "Test this mapping" button — fires the URL on demand using test
       mode's STA path, shows response inline.
+	  
+- [ ] **Revaluate always visible header**:necessary.  add more info?
