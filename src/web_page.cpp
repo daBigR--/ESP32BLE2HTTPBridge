@@ -196,9 +196,11 @@ const char PAGE[] PROGMEM = R"HTML(
       cursor: pointer;
       font-family: inherit;
       font-size: 0.9rem;
+      transition: background 0.15s;
     }
     button.alt  { background: #6b7f75; }
     button.warn { background: var(--warn); }
+    .btn-flash-saved { background: var(--ok) !important; }
 
     /* Ã¢â€â‚¬Ã¢â€â‚¬ Lists Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
     ul { list-style: none; margin: 0; padding: 0; }
@@ -274,6 +276,26 @@ const char PAGE[] PROGMEM = R"HTML(
       font-style: italic;
       text-align: left;
     }
+    .inline-error {
+      color: var(--warn);
+      font-size: 0.85rem;
+      margin-top: 8px;
+      padding: 6px 10px;
+      background: #fdf0ef;
+      border-radius: 8px;
+      border: 1px solid #e8c4c0;
+      display: none;
+    }
+    .modal-error {
+      color: var(--warn);
+      font-size: 0.88rem;
+      padding: 8px 10px;
+      background: #fdf0ef;
+      border-radius: 8px;
+      border: 1px solid #e8c4c0;
+      margin-bottom: 12px;
+      display: none;
+    }
 
     .modal-bg {
       display: none;
@@ -344,6 +366,7 @@ const char PAGE[] PROGMEM = R"HTML(
             <button onclick="addWifi()">Add</button>
           </div>
           <div id="wifiNetworksList"></div>
+          <div class="inline-error" id="wifiError"></div>
         </div>
       </div>
       <div class="card">
@@ -353,8 +376,9 @@ const char PAGE[] PROGMEM = R"HTML(
           <div class="row" style="gap:8px">
             <input type="number" id="sleepTimeoutMinInput" min="0.5" step="0.5" placeholder="10" style="width:140px" />
             <span style="color:var(--muted)">minutes</span>
-            <button onclick="saveSleepTimeout()">Save Timeout</button>
+            <button id="sleepTimeoutBtn" onclick="saveSleepTimeout()">Save</button>
           </div>
+          <div class="inline-error" id="sleepError"></div>
         </div>
       </div>
     </div>
@@ -364,7 +388,7 @@ const char PAGE[] PROGMEM = R"HTML(
       <div class="card">
         <h2>Keyboard Scan</h2>
         <div class="row">
-          <button onclick="scan()">Scan Keyboards</button>
+          <button onclick="scan()">Scan Devices</button>
         </div>
         <div id="state">Idle</div>
         <h2 style="margin-top:16px">Discovered Devices</h2>
@@ -384,17 +408,18 @@ const char PAGE[] PROGMEM = R"HTML(
           <div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px">In run mode button short press cycles base URLs, double press saves the selection.</div>
           <div class="row" style="gap:8px;margin-bottom:8px">
             <input type="text" id="newUrlInput" placeholder="http://192.168.x.x:8080" style="flex:1" />
-            <button id="urlActionBtn" onclick="addUrl()">Add URL</button>
+            <button id="urlActionBtn" onclick="addUrl()">Add</button>
             <button id="urlCancelBtn" class="alt" onclick="cancelUrlEdit()" style="display:none">Cancel</button>
           </div>
           <div id="baseUrlsList"></div>
+          <div class="inline-error" id="urlError"></div>
         </div>
       </div>
       <div class="card">
         <h2>Assign a Button</h2>
         <div class="cfg-section">
           <div class="row" style="margin-bottom:8px;gap:8px">
-            <button id="captureBtn" onclick="startCapture()">Capture Burst</button>
+            <button id="captureBtn" onclick="startCapture()">Capture Key</button>
             <span class="captured-box" id="capturedKey">&mdash;</span>
           </div>
           <div class="row" style="gap:8px;margin-bottom:6px">
@@ -407,6 +432,7 @@ const char PAGE[] PROGMEM = R"HTML(
         <div class="cfg-section" style="margin-bottom:0">
           <label class="cfg-label">Current Mappings</label>
           <div id="mappingsList"></div>
+          <div class="inline-error" id="mappingError"></div>
         </div>
       </div>
     </div>
@@ -416,8 +442,8 @@ const char PAGE[] PROGMEM = R"HTML(
       <div class="card">
         <h2>Device Control</h2>
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">
-          <button onclick="rebootDevice()">&#x21BA; Reboot</button>
-          <button class="warn" onclick="factoryReset()">&#x26A0; Factory Reset</button>
+          <button onclick="showModal('rebootModal')">&#x21BA; Reboot</button>
+          <button class="warn" onclick="showModal('resetModal')">&#x26A0; Factory Reset</button>
         </div>
         <div style="color:var(--muted);font-size:0.85rem">
           <b>Reboot</b> restarts into run mode if config is complete.
@@ -438,14 +464,36 @@ const char PAGE[] PROGMEM = R"HTML(
   </div><!-- /.wrap -->
 
   <!-- Ã¢â€â‚¬Ã¢â€â‚¬ Apply & Run confirmation modal Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ -->
-  <div id="applyModal" class="modal-bg">
+  <div id="applyModal" class="modal-bg" onclick="modalBackdropClick(event,'applyModal')">
     <div class="modal">
       <h3>Apply &amp; Run</h3>
-      <p>This will exit configuration mode and reboot into run mode. The web UI will become unreachable.<br><br>
-         To return to configuration, hold the boot button (D10) on the ESP32 for &ge;&nbsp;0.8&nbsp;s at power-on.</p>
+      <p>This will exit configuration mode and reboot into run mode. The web UI will become unreachable. To return to configuration, hold the boot button (D10) for &ge;&nbsp;0.8&nbsp;s at power-on.</p>
+      <div class="modal-error" id="applyModalError"></div>
       <div class="actions">
-        <button class="alt" onclick="closeApplyModal()" style="margin-right:8px">Cancel</button>
+        <button class="alt" onclick="closeModal('applyModal')">Cancel</button>
         <button onclick="confirmApplyRun()">Apply &amp; Run</button>
+      </div>
+    </div>
+  </div>
+  <div id="rebootModal" class="modal-bg" onclick="modalBackdropClick(event,'rebootModal')">
+    <div class="modal">
+      <h3>Reboot</h3>
+      <p>Reboot the ESP32? Configuration will be retained. The web UI will be briefly unavailable while the device restarts.</p>
+      <div class="modal-error" id="rebootModalError"></div>
+      <div class="actions">
+        <button class="alt" onclick="closeModal('rebootModal')">Cancel</button>
+        <button onclick="confirmReboot()">Reboot</button>
+      </div>
+    </div>
+  </div>
+  <div id="resetModal" class="modal-bg" onclick="modalBackdropClick(event,'resetModal')">
+    <div class="modal">
+      <h3>Factory Reset</h3>
+      <p>Erase all bonds, mappings, and saved networks? This cannot be undone.</p>
+      <div class="modal-error" id="resetModalError"></div>
+      <div class="actions">
+        <button class="alt" onclick="closeModal('resetModal')">Cancel</button>
+        <button class="warn" onclick="confirmReset()">Erase Everything</button>
       </div>
     </div>
   </div>
@@ -486,10 +534,14 @@ const char PAGE[] PROGMEM = R"HTML(
     async function scan() {
       scanRan = true;
       status('Scanning for 4 seconds...');
-      var r = await fetch('/scan');
-      var data = await r.json();
-      renderDevices(data.devices || [], currentBondedAddress);
-      status('Scan complete');
+      try {
+        var r = await fetch('/scan');
+        var data = await r.json();
+        renderDevices(data.devices || [], currentBondedAddress);
+        status('Scan complete');
+      } catch (e) {
+        status('Scan failed. Check device connection.');
+      }
     }
 
     function renderDevices(devices, selectedBondedAddress) {
@@ -649,7 +701,7 @@ const char PAGE[] PROGMEM = R"HTML(
       var r = await fetch('/pair?addr=' + encodeURIComponent(address) + '&name=' + encodeURIComponent(name));
       var data = await r.json();
       if (data.ok) {
-        status('Paired with ' + name + '. Waiting for automatic reconnect...');
+        status('Paired with ' + name + '.');
         await refreshState();
       } else {
         status(data.error || 'Pair failed');
@@ -697,13 +749,21 @@ const char PAGE[] PROGMEM = R"HTML(
     async function saveSleepTimeout() {
       var raw = document.getElementById('sleepTimeoutMinInput').value;
       var minutes = parseFloat(raw);
-      if (!Number.isFinite(minutes) || minutes <= 0) { status('Enter a valid timeout in minutes'); return; }
+      if (!Number.isFinite(minutes) || minutes <= 0) { showInlineError('sleepError', 'Enter a valid timeout in minutes.'); return; }
+      clearInlineError('sleepError');
       var ms = Math.round(minutes * 60000);
-      var r = await fetch('/config/setsleeptimeout?ms=' + encodeURIComponent(ms));
-      var data = await r.json();
-      if (!data.ok) { status(data.error || 'Failed to save timeout'); return; }
-      renderSleepTimeout(data.sleepTimeoutMs || ms);
-      status('Sleep timeout saved');
+      var btn = document.getElementById('sleepTimeoutBtn');
+      btn.disabled = true;
+      try {
+        var r = await fetch('/config/setsleeptimeout?ms=' + encodeURIComponent(ms));
+        var data = await r.json();
+        if (!data.ok) { showInlineError('sleepError', data.error || 'Save failed.'); btn.disabled = false; return; }
+        renderSleepTimeout(data.sleepTimeoutMs || ms);
+        flashSaved(btn, 'Save');
+      } catch (e) {
+        showInlineError('sleepError', 'Save failed. Check connection.');
+        btn.disabled = false;
+      }
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ WiFi networks Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -725,20 +785,32 @@ const char PAGE[] PROGMEM = R"HTML(
     async function addWifi() {
       var ssid = document.getElementById('wifiSsidInput').value.trim();
       var pwd  = document.getElementById('wifiPwdInput').value;
-      if (!ssid) { status('Enter WiFi SSID first'); return; }
-      await fetch('/config/addwifi?ssid=' + encodeURIComponent(ssid) + '&pwd=' + encodeURIComponent(pwd));
-      document.getElementById('wifiSsidInput').value = '';
-      document.getElementById('wifiPwdInput').value  = '';
-      await loadConfig();
-      status('WiFi network saved');
+      if (!ssid) { showInlineError('wifiError', 'Enter an SSID first.'); return; }
+      clearInlineError('wifiError');
+      try {
+        var r = await fetch('/config/addwifi?ssid=' + encodeURIComponent(ssid) + '&pwd=' + encodeURIComponent(pwd));
+        var data = await r.json();
+        if (!data.ok) { showInlineError('wifiError', data.error || 'Save failed.'); return; }
+        document.getElementById('wifiSsidInput').value = '';
+        document.getElementById('wifiPwdInput').value  = '';
+        await loadConfig();
+      } catch (e) {
+        showInlineError('wifiError', 'Save failed. Check connection.');
+      }
     }
 
     async function deleteWifi(idx) {
       var net = wifiNets[idx];
       if (!net) return;
-      await fetch('/config/delwifi?ssid=' + encodeURIComponent(net.ssid));
-      await loadConfig();
-      status('WiFi network removed');
+      clearInlineError('wifiError');
+      try {
+        var r = await fetch('/config/delwifi?ssid=' + encodeURIComponent(net.ssid));
+        var data = await r.json();
+        if (!data.ok) { showInlineError('wifiError', data.error || 'Remove failed.'); return; }
+        await loadConfig();
+      } catch (e) {
+        showInlineError('wifiError', 'Remove failed. Check connection.');
+      }
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Base URLs Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -753,10 +825,10 @@ const char PAGE[] PROGMEM = R"HTML(
         return;
       }
       el.innerHTML = '<ul>' + urls.map(function(u, i) {
-        var badge = (i === selectedIdx) ? '<span class="pill ok">Active</span>' : '';
-        var activateBtn = (i === selectedIdx)
-          ? '<button class="alt" disabled>Active</button>'
-          : '<button onclick="activateUrl(' + i + ')">Activate</button>';
+        var isActive = (i === selectedIdx);
+        var multi = urls.length > 1;
+        var badge = isActive ? '<span class="pill ok">Active</span>' : '';
+        var activateBtn = multi && !isActive ? '<button onclick="activateUrl(' + i + ')">Activate</button>' : '';
         return '<li><div style="min-width:0;flex:1"><span class="mono">' + u + '</span>' +
                (badge ? '&nbsp;' + badge : '') + '</div>' +
                '<div class="actions">' + activateBtn +
@@ -767,23 +839,35 @@ const char PAGE[] PROGMEM = R"HTML(
     }
 
     async function activateUrl(idx) {
-      await fetch('/config/selecturl?idx=' + idx);
-      await loadConfig();
-      status('Active URL set to #' + (idx + 1));
+      clearInlineError('urlError');
+      try {
+        var r = await fetch('/config/selecturl?idx=' + idx);
+        var data = await r.json();
+        if (!data.ok) { showInlineError('urlError', data.error || 'Failed to activate URL.'); return; }
+        await loadConfig();
+      } catch (e) {
+        showInlineError('urlError', 'Failed to activate URL. Check connection.');
+      }
     }
 
     async function addUrl() {
       var url = document.getElementById('newUrlInput').value.trim();
-      if (!url) { status('Enter a URL first'); return; }
-      if (urlEditIndex >= 0) {
-        await fetch('/config/editurl?idx=' + urlEditIndex + '&url=' + encodeURIComponent(url));
-        status('URL updated');
-      } else {
-        await fetch('/config/addurl?url=' + encodeURIComponent(url));
-        status('URL added');
+      if (!url) { showInlineError('urlError', 'Enter a URL first.'); return; }
+      clearInlineError('urlError');
+      try {
+        var r;
+        if (urlEditIndex >= 0) {
+          r = await fetch('/config/editurl?idx=' + urlEditIndex + '&url=' + encodeURIComponent(url));
+        } else {
+          r = await fetch('/config/addurl?url=' + encodeURIComponent(url));
+        }
+        var data = await r.json();
+        if (!data.ok) { showInlineError('urlError', data.error || 'Save failed.'); return; }
+        cancelUrlEdit();
+        await loadConfig();
+      } catch (e) {
+        showInlineError('urlError', 'Save failed. Check connection.');
       }
-      cancelUrlEdit();
-      await loadConfig();
     }
 
     function beginEditUrl(idx) {
@@ -798,16 +882,22 @@ const char PAGE[] PROGMEM = R"HTML(
     function cancelUrlEdit() {
       urlEditIndex = -1;
       document.getElementById('newUrlInput').value = '';
-      document.getElementById('urlActionBtn').textContent = 'Add URL';
+      document.getElementById('urlActionBtn').textContent = 'Add';
       document.getElementById('urlCancelBtn').style.display = 'none';
     }
 
     async function deleteUrl(idx) {
-      await fetch('/config/delurl?idx=' + idx);
-      if (urlEditIndex === idx) cancelUrlEdit();
-      else if (urlEditIndex > idx) urlEditIndex--;
-      await loadConfig();
-      status('URL removed');
+      clearInlineError('urlError');
+      try {
+        var r = await fetch('/config/delurl?idx=' + idx);
+        var data = await r.json();
+        if (!data.ok) { showInlineError('urlError', data.error || 'Remove failed.'); return; }
+        if (urlEditIndex === idx) cancelUrlEdit();
+        else if (urlEditIndex > idx) urlEditIndex--;
+        await loadConfig();
+      } catch (e) {
+        showInlineError('urlError', 'Remove failed. Check connection.');
+      }
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Button mappings Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -853,7 +943,7 @@ const char PAGE[] PROGMEM = R"HTML(
       capturedKeyHex = lastSig;
       document.getElementById('capturedKey').textContent = lastSig;
       document.getElementById('assignBtn').disabled = false;
-      document.getElementById('captureBtn').textContent = 'Capture Burst';
+      document.getElementById('captureBtn').textContent = 'Capture Key';
       document.getElementById('captureBtn').disabled = false;
     }
 
@@ -867,7 +957,7 @@ const char PAGE[] PROGMEM = R"HTML(
       document.getElementById('assignBtn').disabled = false;
       document.getElementById('assignBtn').textContent = 'Update';
       document.getElementById('mappingCancelBtn').style.display = '';
-      document.getElementById('captureBtn').textContent = 'Capture Burst';
+      document.getElementById('captureBtn').textContent = 'Capture Key';
       document.getElementById('captureBtn').disabled = false;
       status('Editing mapping ' + sig);
     }
@@ -882,7 +972,7 @@ const char PAGE[] PROGMEM = R"HTML(
       document.getElementById('assignBtn').disabled = true;
       document.getElementById('assignBtn').textContent = 'Assign';
       document.getElementById('mappingCancelBtn').style.display = 'none';
-      document.getElementById('captureBtn').textContent = 'Capture Burst';
+      document.getElementById('captureBtn').textContent = 'Capture Key';
       document.getElementById('captureBtn').disabled = false;
     }
 
@@ -890,21 +980,34 @@ const char PAGE[] PROGMEM = R"HTML(
       if (!capturedKeyHex) return;
       var url   = document.getElementById('mappingUrl').value.trim();
       var label = document.getElementById('mappingLabel').value.trim();
-      if (!url) { status('Enter a URL path first'); return; }
-      if (mappingEditOriginalKey && mappingEditOriginalKey !== capturedKeyHex) {
-        await fetch('/config/delmapping?sig=' + encodeURIComponent(mappingEditOriginalKey));
+      if (!url) { showInlineError('mappingError', 'Enter a URL path first.'); return; }
+      clearInlineError('mappingError');
+      try {
+        if (mappingEditOriginalKey && mappingEditOriginalKey !== capturedKeyHex) {
+          await fetch('/config/delmapping?sig=' + encodeURIComponent(mappingEditOriginalKey));
+        }
+        var r = await fetch('/config/setmapping?sig=' + encodeURIComponent(capturedKeyHex) +
+                    '&url=' + encodeURIComponent(url) + '&label=' + encodeURIComponent(label));
+        var data = await r.json();
+        if (!data.ok) { showInlineError('mappingError', data.error || 'Save failed.'); return; }
+        cancelMappingEdit();
+        await loadConfig();
+      } catch (e) {
+        showInlineError('mappingError', 'Save failed. Check connection.');
       }
-      await fetch('/config/setmapping?sig=' + encodeURIComponent(capturedKeyHex) +
-                  '&url=' + encodeURIComponent(url) + '&label=' + encodeURIComponent(label));
-      status((mappingEditOriginalKey ? 'Updated ' : 'Mapped ') + capturedKeyHex + ' \u2192 ' + url);
-      cancelMappingEdit();
-      await loadConfig();
     }
 
     async function deleteMapping(sig) {
-      await fetch('/config/delmapping?sig=' + encodeURIComponent(sig));
-      if (mappingEditOriginalKey === sig) cancelMappingEdit();
-      await loadConfig();
+      clearInlineError('mappingError');
+      try {
+        var r = await fetch('/config/delmapping?sig=' + encodeURIComponent(sig));
+        var data = await r.json();
+        if (!data.ok) { showInlineError('mappingError', data.error || 'Remove failed.'); return; }
+        if (mappingEditOriginalKey === sig) cancelMappingEdit();
+        await loadConfig();
+      } catch (e) {
+        showInlineError('mappingError', 'Remove failed. Check connection.');
+      }
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Load all config Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -918,32 +1021,91 @@ const char PAGE[] PROGMEM = R"HTML(
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ System: reboot / factory reset Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-    async function rebootDevice() {
-      if (!confirm('Reboot the device now?')) return;
-      status('Rebooting...');
-      await fetch('/reboot');
+    async function confirmReboot() {
+      try {
+        var r = await fetch('/reboot');
+        var data = await r.json();
+        if (!data.ok) { showModalError('rebootModal', data.error || 'Reboot failed.'); return; }
+        closeModal('rebootModal');
+        status('Rebooting...');
+      } catch (e) {
+        showModalError('rebootModal', 'Reboot failed. Check connection.');
+      }
     }
 
-    async function factoryReset() {
-      if (!confirm('Factory reset will erase ALL settings and unpair the keyboard. Are you sure?')) return;
-      status('Resetting...');
-      await fetch('/factory-reset');
-      status('Factory reset done. Device is rebooting.');
+    async function confirmReset() {
+      try {
+        var r = await fetch('/factory-reset');
+        var data = await r.json();
+        if (!data.ok) { showModalError('resetModal', data.error || 'Factory reset failed.'); return; }
+        closeModal('resetModal');
+        status('Erasing everything and rebooting...');
+      } catch (e) {
+        showModalError('resetModal', 'Factory reset failed. Check connection.');
+      }
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Apply & Run modal Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-    function openApplyModal() {
-      document.getElementById('applyModal').classList.add('open');
+    // -- Modal helpers
+    function showModal(id) {
+      document.getElementById(id).classList.add('open');
+      var errEl = document.getElementById(id + 'Error');
+      if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+      var cancelBtn = document.querySelector('#' + id + ' button.alt');
+      if (cancelBtn) cancelBtn.textContent = 'Cancel';
+    }
+    function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+    function modalBackdropClick(e, id) { if (e.target === e.currentTarget) closeModal(id); }
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') ['applyModal','rebootModal','resetModal'].forEach(closeModal);
+    });
+    function openApplyModal() { showModal('applyModal'); }
+    function closeApplyModal() { closeModal('applyModal'); }
+
+    // -- Inline / modal error helpers
+    function showInlineError(id, msg) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = msg;
+      el.style.display = '';
+      clearTimeout(el._t);
+      el._t = setTimeout(function() { el.style.display = 'none'; }, 10000);
+    }
+    function clearInlineError(id) {
+      var el = document.getElementById(id);
+      if (el) { el.style.display = 'none'; el.textContent = ''; clearTimeout(el._t); }
+    }
+    function showModalError(modalId, msg) {
+      var err = document.getElementById(modalId + 'Error');
+      if (!err) return;
+      err.textContent = msg;
+      err.style.display = '';
+      var cancelBtn = document.querySelector('#' + modalId + ' button.alt');
+      if (cancelBtn) cancelBtn.textContent = 'Close';
     }
 
-    function closeApplyModal() {
-      document.getElementById('applyModal').classList.remove('open');
+    // -- Button flash (Save Timeout only)
+    function flashSaved(btn, origText) {
+      btn.textContent = 'Saved!';
+      btn.classList.add('btn-flash-saved');
+      btn.disabled = true;
+      setTimeout(function() {
+        btn.textContent = origText || 'Save';
+        btn.classList.remove('btn-flash-saved');
+        btn.disabled = false;
+      }, 1500);
     }
 
     async function confirmApplyRun() {
-      closeApplyModal();
-      status('Applying config and rebooting to run mode...');
-      await fetch('/reboot');
+      try {
+        var r = await fetch('/reboot');
+        var data = await r.json();
+        if (!data.ok) { showModalError('applyModal', data.error || 'Apply failed.'); return; }
+        closeModal('applyModal');
+        status('Applying config and rebooting to run mode...');
+      } catch (e) {
+        showModalError('applyModal', 'Apply failed. Check connection.');
+      }
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Poll: refreshState Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬

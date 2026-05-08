@@ -50,7 +50,7 @@
 - [x] **Make saved data lists better looking**: saved networks (SSID list), saved URLs, assigned
       mappings listing look too flat plain not clear, better visual deign needed.  Card-style list rendering for saved networks, URLs, and mappings — primary text + secondary info + right-anchored Edit/Remove actions, hover state, optional left-side type icon.
 	  
-- [ ] **Confirm action visuals**: for certain actions currently with no visual feedback
+- [x] **Confirm action visuals**: for certain actions currently with no visual feedback
       add some kind of visual aid and alert for failures!  
       *Inline button state*. The button you just clicked momentarily changes: "Save" → "Saved ✓"
 	  for ~1.5 seconds → back to "Save." Or "Add Network" → grays out with a spinner → returns
@@ -61,7 +61,7 @@
 	  list visibly changed is the confirmation. No separate notification needed. Works especially
 	  well when paired with the card-style list redesign you already have on your todo.
 
-- [ ] **Unify button labels**: change add, save timeout, add irl, assign, etc labels to make them consistent,
+- [x] **Unify button labels**: change add, save timeout, add irl, assign, etc labels to make them consistent,
       arrange carefully so context allows clear understanding of action.
 
 - [ ] ***Add test mode in config**: allow the user to press buttons and send them to the configured
