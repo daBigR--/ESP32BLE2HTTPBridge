@@ -47,6 +47,9 @@
 - [x] **Show empty label when applicable** when applicable do not lose that section when empty. Apply
       the same concept to all empty sections.
 	  
+- [x] **Make saved data lists better looking**: saved networks (SSID list), saved URLs, assigned
+      mappings listing look too flat plain not clear, better visual deign needed.  Card-style list rendering for saved networks, URLs, and mappings — primary text + secondary info + right-anchored Edit/Remove actions, hover state, optional left-side type icon.
+	  
 - [ ] **Confirm action visuals**: for certain actions currently with no visual feedback
       add some kind of visual aid and alert for failures!  
       *Inline button state*. The button you just clicked momentarily changes: "Save" → "Saved ✓"
@@ -58,9 +61,6 @@
 	  list visibly changed is the confirmation. No separate notification needed. Works especially
 	  well when paired with the card-style list redesign you already have on your todo.
 
-- [ ] **Make saved data lists better looking**: saved networks (SSID list), saved URLs, assigned
-      mappings listing look too flat plain not clear, better visual deign needed.  Card-style list rendering for saved networks, URLs, and mappings — primary text + secondary info + right-anchored Edit/Remove actions, hover state, optional left-side type icon.
-	  
 - [ ] **Unify button labels**: change add, save timeout, add irl, assign, etc labels to make them consistent,
       arrange carefully so context allows clear understanding of action.
 

@@ -255,14 +255,6 @@ const char PAGE[] PROGMEM = R"HTML(
     }
     .cfg-label { font-weight: 700; display: block; margin-bottom: 6px; }
     .cfg-section { margin-bottom: 16px; }
-    .mapping-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 7px 0;
-      border-bottom: 1px solid var(--line);
-    }
-    .mapping-row:last-child { border-bottom: none; }
     .captured-box {
       background: #eef4f1;
       border: 1px solid var(--line);
@@ -724,10 +716,10 @@ const char PAGE[] PROGMEM = R"HTML(
         el.innerHTML = '<div class="empty-state">No networks saved \u2014 fill in the SSID and password above to add one.</div>';
         return;
       }
-      el.innerHTML = nets.map(function(n, i) {
-        return '<div class="mapping-row"><span style="flex:1">' + n.ssid + '</span>' +
-               '<button class="warn" style="padding:5px 10px;font-size:0.8rem" onclick="deleteWifi(' + i + ')">Del</button></div>';
-      }).join('');
+      el.innerHTML = '<ul>' + nets.map(function(n, i) {
+        return '<li><div style="min-width:0;flex:1"><strong>' + n.ssid + '</strong></div>' +
+               '<div class="actions"><button class="warn" onclick="deleteWifi(' + i + ')">Remove</button></div></li>';
+      }).join('') + '</ul>';
     }
 
     async function addWifi() {
@@ -760,19 +752,18 @@ const char PAGE[] PROGMEM = R"HTML(
         el.innerHTML = '<div class="empty-state">No URLs configured \u2014 enter a URL above to add one.</div>';
         return;
       }
-      el.innerHTML = urls.map(function(u, i) {
-        var badge = (i === selectedIdx)
-          ? '<span class="pill ok" style="margin-left:6px">Active</span>' : '';
+      el.innerHTML = '<ul>' + urls.map(function(u, i) {
+        var badge = (i === selectedIdx) ? '<span class="pill ok">Active</span>' : '';
         var activateBtn = (i === selectedIdx)
-          ? '<button class="alt" style="padding:5px 10px;font-size:0.8rem" disabled>Active</button>'
-          : '<button style="padding:5px 10px;font-size:0.8rem" onclick="activateUrl(' + i + ')">Activate</button>';
-        return '<div class="mapping-row">' +
-               '<span style="flex:1" class="mono">' + u + badge + '</span>' +
-               activateBtn +
-               '<button class="alt" style="padding:5px 10px;font-size:0.8rem" onclick="beginEditUrl(' + i + ')">Edit</button>' +
-               '<button class="warn" style="padding:5px 10px;font-size:0.8rem" onclick="deleteUrl(' + i + ')">Del</button>' +
-               '</div>';
-      }).join('');
+          ? '<button class="alt" disabled>Active</button>'
+          : '<button onclick="activateUrl(' + i + ')">Activate</button>';
+        return '<li><div style="min-width:0;flex:1"><span class="mono">' + u + '</span>' +
+               (badge ? '&nbsp;' + badge : '') + '</div>' +
+               '<div class="actions">' + activateBtn +
+               '<button class="alt" onclick="beginEditUrl(' + i + ')">Edit</button>' +
+               '<button class="warn" onclick="deleteUrl(' + i + ')">Remove</button>' +
+               '</div></li>';
+      }).join('') + '</ul>';
     }
 
     async function activateUrl(idx) {
@@ -831,16 +822,20 @@ const char PAGE[] PROGMEM = R"HTML(
         el.innerHTML = '<div class="empty-state">No mappings yet \u2014 connect a BLE device, press a button, then assign a URL to the captured signature.</div>';
         return;
       }
-      el.innerHTML = mappings.map(function(m) {
-        return '<div class="mapping-row">' +
-          '<span class="mono" style="min-width:72px">' + m.sig + '</span>' +
-          '<span style="flex:1">' + m.url + '</span>' +
-          '<span style="color:var(--muted);font-size:0.85rem;min-width:60px">' + (m.label || '') + '</span>' +
-          '<button class="alt" style="padding:5px 10px;font-size:0.8rem" ' +
-            'onclick="beginEditMapping(\'' + m.sig + '\',\'' + encodeURIComponent(m.url) + '\',\'' + encodeURIComponent(m.label || '') + '\')">Edit</button>' +
-          '<button class="warn" style="padding:5px 10px;font-size:0.8rem" onclick="deleteMapping(\'' + m.sig + '\')">Delete</button>' +
-          '</div>';
-      }).join('');
+      el.innerHTML = '<ul>' + mappings.map(function(m) {
+        var primary = m.label
+          ? '<strong>' + m.label + '</strong>'
+          : '<span class="mono">' + m.sig + '</span>';
+        var secondary = m.label
+          ? '<div class="mono" style="color:var(--muted);font-size:0.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + m.url + '</div>' +
+            '<div class="mono" style="color:var(--muted);font-size:0.78rem">' + m.sig + '</div>'
+          : '<div class="mono" style="color:var(--muted);font-size:0.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + m.url + '</div>';
+        return '<li><div style="min-width:0;flex:1">' + primary + secondary + '</div>' +
+          '<div class="actions">' +
+          '<button class="alt" onclick="beginEditMapping(\'' + m.sig + '\',\'' + encodeURIComponent(m.url) + '\',\'' + encodeURIComponent(m.label || '') + '\')">' + 'Edit</button>' +
+          '<button class="warn" onclick="deleteMapping(\'' + m.sig + '\')">' + 'Delete</button>' +
+          '</div></li>';
+      }).join('') + '</ul>';
     }
 
     function startCapture() {
