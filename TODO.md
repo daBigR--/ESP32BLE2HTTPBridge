@@ -44,7 +44,7 @@
       timeout, from BLE setup: scan, pair, bond, from actions setup: keys -> event mapping and 
       from device control.   Use tabbed interface.  Keep bonded device at the top all the time.
 
-- [x] **Show empty label when aplicable** when applicable do not lose that section when empty. Apply
+- [x] **Show empty label when applicable** when applicable do not lose that section when empty. Apply
       the same concept to all empty sections.
 	  
 - [ ] **Confirm action visuals**: for certain actions currently with no visual feedback
@@ -76,6 +76,9 @@
 	  enters key to pair that event with.  Instead of parsing on the ESP32, have the ESP32
 	  act as a CORS proxy — fetch the KOReader page and forward it to the browser. Then
 	  JavaScript in your config UI does the parsing.
+
+- [ ] **Make sure all logs visible in UI**: make sure ALL info currently being displayed as serial
+      output is also shown on the log text in System tab.
 
 - [ ] **Add scan available networks**: for initial SSID entry so you don't have to enter manually
 
