@@ -92,7 +92,7 @@
 
 ## Cleanup / Tech Debt
 
-- [ ] **Update README**: re write readme.md with current project situation. 
+- [ ] **Update README**: rewrite readme.md with current project situation. 
 
 - [x] Delete `BLEPairBasicDiagnostic/` and `BLEPairBasicDiagnosticBaseline/` directories —
       these were temporary debugging aids and are no longer needed.
