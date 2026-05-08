@@ -273,6 +273,14 @@ const char PAGE[] PROGMEM = R"HTML(
     }
 
     /* â”€â”€ Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    .empty-state {
+      padding: 18px 4px;
+      color: #888;
+      font-size: 0.88rem;
+      font-style: italic;
+      text-align: left;
+    }
+
     .modal-bg {
       display: none;
       position: fixed;
@@ -481,7 +489,10 @@ const char PAGE[] PROGMEM = R"HTML(
     }
 
     // â”€â”€ BLE scan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    var scanRan = false;
+
     async function scan() {
+      scanRan = true;
       status('Scanning for 4 seconds...');
       var r = await fetch('/scan');
       var data = await r.json();
@@ -494,7 +505,10 @@ const char PAGE[] PROGMEM = R"HTML(
       var sel = (selectedBondedAddress || '').toUpperCase();
       var seen = devices.filter(function(d) { return d.seen && d.address.toUpperCase() !== sel; });
       if (!seen.length) {
-        elDevices.innerHTML = '<li style="border:none;color:var(--muted)">No BLE devices found in this scan.</li>';
+        var msg = scanRan
+          ? 'No devices found in this scan.'
+          : 'No devices visible \u2014 click Scan to search.';
+        elDevices.innerHTML = '<li style="border:none;padding:0"><div class="empty-state">' + msg + '</div></li>';
         return;
       }
 
@@ -577,7 +591,8 @@ const char PAGE[] PROGMEM = R"HTML(
       var card = document.getElementById('bondedCard');
       var info = document.getElementById('bondedInfo');
       if (!s.bondedAddress) {
-        card.style.display = 'none';
+        card.style.display = '';
+        info.innerHTML = '<div class="empty-state">No device bonded \u2014 start a scan above to find one.</div>';
         return;
       }
       card.style.display = '';
@@ -706,7 +721,7 @@ const char PAGE[] PROGMEM = R"HTML(
       wifiNets = nets;
       var el = document.getElementById('wifiNetworksList');
       if (!nets.length) {
-        el.innerHTML = '<div style="color:var(--muted);font-size:0.9rem">No networks saved.</div>';
+        el.innerHTML = '<div class="empty-state">No networks saved \u2014 fill in the SSID and password above to add one.</div>';
         return;
       }
       el.innerHTML = nets.map(function(n, i) {
@@ -742,7 +757,7 @@ const char PAGE[] PROGMEM = R"HTML(
       baseUrlsList = urls;
       var el = document.getElementById('baseUrlsList');
       if (!urls.length) {
-        el.innerHTML = '<div style="color:var(--muted);font-size:0.9rem">No URLs configured.</div>';
+        el.innerHTML = '<div class="empty-state">No URLs configured \u2014 enter a URL above to add one.</div>';
         return;
       }
       el.innerHTML = urls.map(function(u, i) {
@@ -813,7 +828,7 @@ const char PAGE[] PROGMEM = R"HTML(
     function renderMappings(mappings) {
       var el = document.getElementById('mappingsList');
       if (!mappings.length) {
-        el.innerHTML = '<div style="color:var(--muted);font-size:0.9rem">No mappings defined yet.</div>';
+        el.innerHTML = '<div class="empty-state">No mappings yet \u2014 connect a BLE device, press a button, then assign a URL to the captured signature.</div>';
         return;
       }
       el.innerHTML = mappings.map(function(m) {
