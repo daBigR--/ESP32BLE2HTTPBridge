@@ -40,7 +40,7 @@
 
 - [x] **Scan list**: collapse "Other Devices" section by default; expand only on user tap.
 
-- [ ] **Restructure config page**: clean the current layout, separate general setup: SSID, pwd,
+- [x] **Restructure config page**: clean the current layout, separate general setup: SSID, pwd,
       timeout, from BLE setup: scan, pair, bond, from actions setup: keys -> event mapping and 
       from device control.   Use tabbed interface.  Keep bonded device at the top all the time.
 
