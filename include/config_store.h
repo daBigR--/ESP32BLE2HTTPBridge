@@ -121,6 +121,17 @@ bool hasValidRunConfig(
   const String&                      preferredBondedAddress
 );
 
+// Set a one-shot NVS flag that causes the next boot to enter CONFIG mode
+// directly, without requiring the user to hold D10 at power-on.
+// Call this just before esp_restart() from the extra-long button press handler.
+void setConfigBootFlag();
+
+// Read and unconditionally clear the config-boot NVS flag.
+// Returns true if the flag was set (i.e., this boot was triggered by the
+// extra-long button press).  Always clears the flag so it cannot linger
+// across multiple boots.
+bool getAndClearConfigBootFlag();
+
 // Call Preferences::clear() on the "ble_cfg" namespace, wiping every stored
 // key in a single operation.  Triggers a clean-slate boot on the next restart.
 void clearAll();

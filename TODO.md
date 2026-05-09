@@ -75,6 +75,11 @@
 - [x] **Collapse scan lists after selection**:both wifi and ble once ssid selected or device paired
       collapse or delete the list only show again on new scan
 
+- [x] **Extra long buttton press into CONFIG mode**: add an additional button press pattern
+      that will exit run mode and boot into config mode regardless of button press on boot.
+      Make this extra long distinct from current long by starting blinking led D1 rapidly after
+      current long press threshold and until extra long threshold reached then turns on continuosly.
+
 - [ ] **Add test mode in config**: allow the user to press buttons and send them to the configured
       url + action mappings without exiting config mode.  Requires complete configuration:
 	  ssid/pwd, paired device, base URL and at least one action map.  Then switching mode

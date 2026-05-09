@@ -257,6 +257,29 @@ bool hasValidRunConfig(
 }
 
 // ---------------------------------------------------------------------------
+// setConfigBootFlag — write the one-shot config-boot NVS flag
+// ---------------------------------------------------------------------------
+// Key "cfgboot" is set to 1.  On the next boot, getAndClearConfigBootFlag()
+// reads and clears it, forcing CONFIG mode entry regardless of button state.
+void setConfigBootFlag() {
+  gPrefs.begin("ble_cfg", false);
+  gPrefs.putUChar("cfgboot", 1);
+  gPrefs.end();
+}
+
+// ---------------------------------------------------------------------------
+// getAndClearConfigBootFlag — read and clear the one-shot config-boot flag
+// ---------------------------------------------------------------------------
+// Always writes 0 back so the flag cannot survive multiple boots.
+bool getAndClearConfigBootFlag() {
+  gPrefs.begin("ble_cfg", false);
+  uint8_t flag = gPrefs.getUChar("cfgboot", 0);
+  gPrefs.putUChar("cfgboot", 0);
+  gPrefs.end();
+  return flag != 0;
+}
+
+// ---------------------------------------------------------------------------
 // clearAll — wipe the entire NVS namespace (factory reset)
 // ---------------------------------------------------------------------------
 // Preferences::clear() removes every key under the current namespace.

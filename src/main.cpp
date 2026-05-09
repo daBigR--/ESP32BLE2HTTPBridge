@@ -199,12 +199,18 @@ static const unsigned long URL_BLINK_PERIOD  = URL_BLINK_OFF_MS + URL_BLINK_ON_M
 static const unsigned long URL_SAVE_PULSE_MS = 600;
 
 // Button timing for URL cycling / save / sleep:
-//   DEBOUNCE   — minimum hold to filter electrical noise
-//   LONG_PRESS — hold duration that triggers deep-sleep entry
-//   DOUBLE_WIN — maximum gap between two short presses to count as double-press
-static const unsigned long URL_BTN_DEBOUNCE_MS      = 50;
-static const unsigned long URL_BTN_LONG_PRESS_MS    = 800;
-static const unsigned long URL_BTN_DOUBLE_WINDOW_MS = 400;
+//   DEBOUNCE        — minimum hold to filter electrical noise
+//   LONG_PRESS      — hold duration that triggers deep-sleep entry
+//   EXTRA_LONG_PRESS— hold duration that triggers reboot into CONFIG mode
+//   DOUBLE_WIN      — maximum gap between two short presses to count as double-press
+static const unsigned long URL_BTN_DEBOUNCE_MS          =   50;
+static const unsigned long URL_BTN_LONG_PRESS_MS        =  800;
+static const unsigned long URL_BTN_EXTRA_LONG_PRESS_MS  = 4000;
+static const unsigned long URL_BTN_DOUBLE_WINDOW_MS     =  400;
+
+// D1 rapid-blink half-period while button is held in the long-press zone
+// (between LONG_PRESS_MS and EXTRA_LONG_PRESS_MS).  100 ms → 5 Hz blink.
+static const unsigned long BLE_HOLD_BLINK_HALF_MS = 100;
 
 // ---------------------------------------------------------------------------
 // LED state shared between event callbacks and the LED task
@@ -229,6 +235,12 @@ static volatile unsigned long gHttpLedForceOffUntilMs = 0;
 // D3 URL-select burst blink: gD3BurstCount blinks starting at gD3BurstStartMs.
 static volatile uint8_t       gD3BurstCount   = 0;
 static volatile unsigned long gD3BurstStartMs = 0;
+
+// D1 hold-state indicator, written by handleButton(), read by updateStatusLeds():
+//   0 — normal BLE connection + key-press blink behavior
+//   1 — rapid blink (button held past LONG_PRESS_MS, before EXTRA_LONG_PRESS_MS)
+//   2 — steady ON (button held past EXTRA_LONG_PRESS_MS)
+static volatile uint8_t gD1HoldState = 0;
 
 // Button state machine for runtime URL cycling / save / sleep (RUN mode only).
 // BTN_IDLE            — waiting for the first press
@@ -428,9 +440,29 @@ void handleButton() {
       break;
 
     case BTN_PRESSED:
-      if (!pressed) {
+      if (pressed) {
+        // Button still held — update D1 hold indicator so the LED task can
+        // give the user visual feedback about which press zone they are in.
+        unsigned long holding = now - gBtnPressMs;
+        if (holding >= URL_BTN_EXTRA_LONG_PRESS_MS) {
+          gD1HoldState = 2; // steady ON — extra-long zone (config reboot on release)
+        } else if (holding >= URL_BTN_LONG_PRESS_MS) {
+          gD1HoldState = 1; // rapid blink — long-press zone (sleep on release)
+        } else {
+          gD1HoldState = 0; // below long-press threshold — normal D1 behavior
+        }
+      } else {
+        // Button released — clear hold indicator, then dispatch exactly one action.
+        gD1HoldState = 0;
         unsigned long held = now - gBtnPressMs;
-        if (held >= URL_BTN_LONG_PRESS_MS) {
+        if (held >= URL_BTN_EXTRA_LONG_PRESS_MS) {
+          // Extra-long press: set NVS flag and reboot into CONFIG mode.
+          // No sleep, no URL cycle — only this fires.
+          KeyLog::add("Button: extra-long press → reboot to CONFIG");
+          ConfigStore::setConfigBootFlag();
+          delay(200);
+          esp_restart();
+        } else if (held >= URL_BTN_LONG_PRESS_MS) {
           enterDeepSleep();           // button already released — guard will pass
           gBtnState = BTN_IDLE;
         } else if (held >= URL_BTN_DEBOUNCE_MS) {
@@ -566,6 +598,18 @@ void updateStatusLeds() {
     unsigned long cycle   = BLE_KEY_BLINK_OFF_MS + BLE_KEY_BLINK_ON_MS;
     unsigned long phase   = elapsed % cycle;   // 0 … cycle-1
     bleLedOn = phase >= BLE_KEY_BLINK_OFF_MS;  // OFF in [0, off_ms), ON in [off_ms, cycle)
+  }
+
+  // Hold-state override: while D10 is held past LONG_PRESS_MS the button handler
+  // sets gD1HoldState to give the user tactile confirmation of which zone they
+  // are in.  This takes priority over the connection/blink-window logic above.
+  //   1 → rapid blink at BLE_HOLD_BLINK_HALF_MS (long-press zone: sleep)
+  //   2 → steady ON                              (extra-long zone:  config reboot)
+  //   0 → no override; normal behavior restored after button release
+  if (gD1HoldState == 2) {
+    bleLedOn = true;
+  } else if (gD1HoldState == 1) {
+    bleLedOn = (now / BLE_HOLD_BLINK_HALF_MS) % 2 == 0;
   }
 
   // --- RUN MODE: D3 — WiFi connection + HTTP-200 blink + URL-select burst ---
@@ -799,6 +843,10 @@ void loadPersistedConfig() {
 // determineConfigMode — decide config vs run mode from boot + persisted state
 // ---------------------------------------------------------------------------
 bool determineConfigMode(bool forceConfigMode) {
+  // Check (and always clear) the one-shot NVS flag set by the extra-long press handler.
+  // This must be done before any early-return so the flag is never left set.
+  bool nvsFlagSet = ConfigStore::getAndClearConfigBootFlag();
+
   // RUN mode is allowed only with complete persisted configuration.
   bool runConfigReady = ConfigStore::hasValidRunConfig(
     gWifiNetworks,
@@ -806,7 +854,7 @@ bool determineConfigMode(bool forceConfigMode) {
     gButtonMappings,
     BLEKeyboard::preferredBondedAddress()
   );
-  return forceConfigMode || !runConfigReady;
+  return forceConfigMode || nvsFlagSet || !runConfigReady;
 }
 
 // ---------------------------------------------------------------------------
