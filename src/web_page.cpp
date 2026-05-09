@@ -346,8 +346,8 @@ const char PAGE[] PROGMEM = R"HTML(
 
   <!-- Ã¢â€â‚¬Ã¢â€â‚¬ Tab bar Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ -->
   <div id="tabBar">
-    <button class="tab-btn" data-tab="general" onclick="switchTab('general')">General</button>
-    <button class="tab-btn" data-tab="ble"     onclick="switchTab('ble')">BLE</button>
+    <button class="tab-btn" data-tab="general" onclick="switchTab('general')">WiFi</button>
+    <button class="tab-btn" data-tab="ble"     onclick="switchTab('ble')">Bluetooth</button>
     <button class="tab-btn" data-tab="actions" onclick="switchTab('actions')">Actions</button>
     <button class="tab-btn" data-tab="system"  onclick="switchTab('system')">System</button>
   </div>
@@ -367,18 +367,6 @@ const char PAGE[] PROGMEM = R"HTML(
           </div>
           <div id="wifiNetworksList"></div>
           <div class="inline-error" id="wifiError"></div>
-        </div>
-      </div>
-      <div class="card">
-        <h2>Power &amp; Sleep</h2>
-        <div class="cfg-section" style="margin-bottom:0">
-          <div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px">Inactivity timeout before sleep, only in normal mode and battery use. Long press in normal mode sleeps immediately.</div>
-          <div class="row" style="gap:8px">
-            <input type="number" id="sleepTimeoutMinInput" min="0.5" step="0.5" placeholder="10" style="width:140px" />
-            <span style="color:var(--muted)">minutes</span>
-            <button id="sleepTimeoutBtn" onclick="saveSleepTimeout()">Save</button>
-          </div>
-          <div class="inline-error" id="sleepError"></div>
         </div>
       </div>
     </div>
@@ -439,6 +427,18 @@ const char PAGE[] PROGMEM = R"HTML(
 
     <!-- SYSTEM Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ -->
     <div id="tab-system" class="tab-panel">
+      <div class="card">
+        <h2>Power &amp; Sleep</h2>
+        <div class="cfg-section" style="margin-bottom:0">
+          <div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px">Inactivity timeout before sleep, only in normal mode and battery use. Long press in normal mode sleeps immediately.</div>
+          <div class="row" style="gap:8px">
+            <input type="number" id="sleepTimeoutMinInput" min="0.5" step="0.5" placeholder="10" style="width:140px" />
+            <span style="color:var(--muted)">minutes</span>
+            <button id="sleepTimeoutBtn" onclick="saveSleepTimeout()">Save</button>
+          </div>
+          <div class="inline-error" id="sleepError"></div>
+        </div>
+      </div>
       <div class="card">
         <h2>Device Control</h2>
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">

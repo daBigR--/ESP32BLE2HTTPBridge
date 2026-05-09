@@ -67,7 +67,7 @@
 - [x] **Make sure all logs visible in UI**: make sure ALL info currently being displayed as serial
       output is also shown on the log text in System tab.
 	  
-- [ ] **Move timeout to system**: and rename tabs General to WiFi, BLE to Bluetooth.
+- [x] **Move timeout to system**: and rename tabs General to WiFi, BLE to Bluetooth.
 
 - [ ] **Add scan available networks**: for initial SSID entry so you don't have to enter manually.
       keep manual entry?
