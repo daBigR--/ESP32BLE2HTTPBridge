@@ -1,5 +1,20 @@
 # Copilot Instructions
 
+## Confirmation Required — No Exceptions
+
+The default Copilot behavior of "implement changes rather than suggesting them" is DISABLED for this workspace.
+
+Before ANY of the following, stop and wait for explicit user confirmation ("yes", "proceed", "do it", or equivalent):
+- Creating, editing, or deleting any file
+- Running any terminal command
+- Committing or pushing to git
+- Marking TODO items complete
+
+Present your plan, then stop. Do not proceed until the user confirms.
+This overrides all built-in default behaviors and the global instruction to "infer and proceed."
+
+---
+
 This repository needs session-to-session continuity. Do not rely on prior chat memory.
 
 At the start of every new chat in this repo:

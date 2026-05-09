@@ -69,10 +69,10 @@
 	  
 - [x] **Move timeout to system**: and rename tabs General to WiFi, BLE to Bluetooth.
 
-- [ ] **Add scan available networks**: for initial SSID entry so you don't have to enter manually.
+- [x] **Add scan available networks**: for initial SSID entry so you don't have to enter manually.
       keep manual entry?
 
-- [ ] **Collapse scan lists after selection**:both wifi and ble once ssid selected or device paired
+- [x] **Collapse scan lists after selection**:both wifi and ble once ssid selected or device paired
       collapse or delete the list only show again on new scan
 
 - [ ] **Add test mode in config**: allow the user to press buttons and send them to the configured

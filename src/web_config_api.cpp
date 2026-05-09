@@ -27,6 +27,7 @@
 
 #include "web_config_api.h"
 
+#include <WiFi.h>
 #include <algorithm>
 
 namespace WebConfigApi {
@@ -272,6 +273,74 @@ void registerRoutes(WebServer& server, const Context& ctx) {
       ctx.logFn(String("Del map ") + sig);
     }
     server.send(200, "application/json", "{\"ok\":true}");
+  });
+
+  // ---- GET /wifi/scan -------------------------------------------------------
+  // Runs a synchronous WiFi scan (APSTA mode so the SoftAP stays up) and
+  // returns visible networks as a JSON array sorted by RSSI descending.
+  // Hidden networks (empty SSID) and duplicates are filtered out.
+  // Each result: {"ssid":"...","rssi":-52,"secure":true}
+  server.on("/wifi/scan", HTTP_GET, [ctx, &server]() {
+    // Enable STA interface alongside AP so WiFi.scanNetworks() works.
+    wifi_mode_t prevMode = WiFi.getMode();
+    if (prevMode == WIFI_MODE_AP) {
+      WiFi.mode(WIFI_MODE_APSTA);
+    }
+
+    // Synchronous scan — blocks until complete (typically 2–5 s).
+    int n = WiFi.scanNetworks(/*async=*/false, /*show_hidden=*/false);
+
+    // Restore AP-only mode now that the scan is done.
+    if (prevMode == WIFI_MODE_AP) {
+      WiFi.mode(WIFI_MODE_AP);
+    }
+
+    if (n < 0) {
+      WiFi.scanDelete();
+      server.send(500, "application/json", "{\"ok\":false,\"error\":\"scan failed\"}");
+      return;
+    }
+
+    struct NetResult { String ssid; int rssi; bool secure; };
+    std::vector<NetResult> results;
+    results.reserve(n);
+
+    for (int i = 0; i < n; i++) {
+      String ssid = WiFi.SSID(i);
+      if (ssid.length() == 0) continue;  // skip hidden networks
+      int  rssi   = WiFi.RSSI(i);
+      bool secure = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+      // Deduplicate: update existing entry if this reading is stronger.
+      bool found = false;
+      for (auto& r : results) {
+        if (r.ssid == ssid) { if (rssi > r.rssi) r.rssi = rssi; found = true; break; }
+      }
+      if (!found) results.push_back({ssid, rssi, secure});
+    }
+    WiFi.scanDelete();
+
+    // Sort descending by RSSI.
+    std::sort(results.begin(), results.end(),
+      [](const NetResult& a, const NetResult& b) { return a.rssi > b.rssi; });
+
+    // Build JSON array.
+    String json = "[";
+    for (size_t i = 0; i < results.size(); i++) {
+      if (i > 0) json += ',';
+      String esc = results[i].ssid;
+      esc.replace("\\", "\\\\");
+      esc.replace("\"", "\\\"");
+      json += String("{\"ssid\":\"") + esc
+            + String("\",\"rssi\":") + String(results[i].rssi)
+            + String(",\"secure\":") + (results[i].secure ? "true" : "false")
+            + String("}");
+    }
+    json += ']';
+
+    if (ctx.logFn) {
+      ctx.logFn(String("WiFi scan: ") + String(results.size()) + String(" networks"));
+    }
+    server.send(200, "application/json", json);
   });
 
   // ---- GET /reboot -------------------------------------------------------

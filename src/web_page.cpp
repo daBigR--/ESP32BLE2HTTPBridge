@@ -158,14 +158,19 @@ const char PAGE[] PROGMEM = R"HTML(
     /* Ã¢â€â‚¬Ã¢â€â‚¬ Status bar Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
     #state {
       background: #eef4f1;
-      color: var(--muted);
-      font-size: 0.85rem;
-      padding: 6px 10px;
+      color: var(--ink);
+      font-size: 0.92rem;
+      font-weight: 600;
+      padding: 8px 12px;
       border-radius: 8px;
       border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
       margin-top: 10px;
-      min-height: 28px;
+      min-height: 32px;
     }
+    #state.state-ok   { background:#e6f4ec; border-left-color:var(--ok);   color:var(--ok); }
+    #state.state-error{ background:#fdf0ef; border-left-color:var(--warn);  color:var(--warn); }
+    #state.state-busy { background:#fff8e6; border-left-color:#c07a00; color:#c07a00; }
 
     /* Ã¢â€â‚¬Ã¢â€â‚¬ Layout Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
     .wrap { max-width: 980px; margin: 0 auto; }
@@ -365,6 +370,14 @@ const char PAGE[] PROGMEM = R"HTML(
             <input type="text" id="wifiPwdInput" placeholder="Password" style="flex:1" />
             <button onclick="addWifi()">Add</button>
           </div>
+          <div class="row" style="margin-bottom:8px">
+            <button id="wifiScanBtn" onclick="scanWifi()">Scan Networks</button>
+          </div>
+          <div id="wifiScanSection" style="display:none;margin-top:20px">
+            <div style="font-weight:700;font-size:0.95rem;margin-bottom:6px">Available Networks</div>
+            <div id="wifiScanResults" style="background:#eef5f1;border:1.5px dashed var(--line);border-radius:8px;padding:8px 4px"></div>
+          </div>
+          <div style="margin-top:28px;font-weight:700;font-size:0.95rem;margin-bottom:6px">Saved Networks</div>
           <div id="wifiNetworksList"></div>
           <div class="inline-error" id="wifiError"></div>
         </div>
@@ -379,8 +392,12 @@ const char PAGE[] PROGMEM = R"HTML(
           <button onclick="scan()">Scan Devices</button>
         </div>
         <div id="state">Idle</div>
-        <h2 style="margin-top:16px">Discovered Devices</h2>
-        <ul id="devices"></ul>
+        <div id="bleDiscoveredSection" style="display:none">
+          <h2 style="margin-top:16px">Discovered Devices</h2>
+          <div id="bleScanSection" style="background:#eef5f1;border:1.5px dashed var(--line);border-radius:8px;padding:4px">
+            <ul id="devices"></ul>
+          </div>
+        </div>
       </div>
       <div class="card" id="bondedCard" style="display:none">
         <h2>Bonded Device</h2>
@@ -524,8 +541,10 @@ const char PAGE[] PROGMEM = R"HTML(
     var currentBondedAddress = '';
     var currentBondedName    = '';
 
-    function status(text) {
-      elState.textContent = text;
+    function status(text, type) {
+      elState.textContent = text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+      elState.classList.remove('state-ok', 'state-error', 'state-busy');
+      if (type) elState.classList.add('state-' + type);
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ BLE scan Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -533,14 +552,15 @@ const char PAGE[] PROGMEM = R"HTML(
 
     async function scan() {
       scanRan = true;
-      status('Scanning for 4 seconds...');
+      status('Scanning for 4 seconds...', 'busy');
       try {
         var r = await fetch('/scan');
         var data = await r.json();
         renderDevices(data.devices || [], currentBondedAddress);
-        status('Scan complete');
+        document.getElementById('bleDiscoveredSection').style.display = '';
+        status('Scan complete.', 'ok');
       } catch (e) {
-        status('Scan failed. Check device connection.');
+        status('Scan failed. Check device connection.', 'error');
       }
     }
 
@@ -697,37 +717,39 @@ const char PAGE[] PROGMEM = R"HTML(
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ BLE device actions Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     async function pairDevice(address, name) {
-      status('Pairing with ' + address + ' ...');
+      document.getElementById('bleDiscoveredSection').style.display = 'none';
+      status('Pairing with ' + address + ' ...', 'busy');
       var r = await fetch('/pair?addr=' + encodeURIComponent(address) + '&name=' + encodeURIComponent(name));
       var data = await r.json();
       if (data.ok) {
-        status('Paired with ' + name + '.');
+        status('Paired with ' + name + '.', 'ok');
         await refreshState();
       } else {
-        status(data.error || 'Pair failed');
+        document.getElementById('bleDiscoveredSection').style.display = '';
+        status(data.error || 'Pair failed', 'error');
       }
     }
 
     async function connectDevice(address, name) {
-      status('Connecting to ' + address + ' ...');
+      status('Connecting to ' + address + ' ...', 'busy');
       var r = await fetch('/connect?addr=' + encodeURIComponent(address) + '&name=' + encodeURIComponent(name));
       var data = await r.json();
       if (data.ok) {
-        status('Connected to ' + name);
+        status('Connected to ' + name, 'ok');
       } else {
-        status(data.error || 'Connect failed');
+        status(data.error || 'Connect failed', 'error');
       }
     }
 
     async function unpairDevice(address, name) {
-      status('Unpairing ' + address + ' ...');
+      status('Unpairing ' + address + ' ...', 'busy');
       var r = await fetch('/unpair?addr=' + encodeURIComponent(address));
       var data = await r.json();
       if (data.ok) {
-        status('Unpaired ' + (name || address));
+        status('Unpaired ' + (name || address), 'ok');
         await scan();
       } else {
-        status(data.error || 'Unpair failed');
+        status(data.error || 'Unpair failed', 'error');
       }
     }
 
@@ -811,6 +833,61 @@ const char PAGE[] PROGMEM = R"HTML(
       } catch (e) {
         showInlineError('wifiError', 'Remove failed. Check connection.');
       }
+    }
+
+    // -- WiFi network scan --------------------------------------------------
+    var wifiScanNets = [];
+
+    async function scanWifi() {
+      var btn = document.getElementById('wifiScanBtn');
+      btn.textContent = 'Scanning\u2026';
+      btn.disabled = true;
+      clearInlineError('wifiError');
+      try {
+        var r = await fetch('/wifi/scan');
+        var data = await r.json();
+        renderWifiScan(Array.isArray(data) ? data : []);
+      } catch (e) {
+        showInlineError('wifiError', 'Scan failed. Check connection.');
+        document.getElementById('wifiScanSection').style.display = 'none';
+      } finally {
+        btn.textContent = 'Scan Networks';
+        btn.disabled = false;
+      }
+    }
+
+    function wifiSignalBars(rssi) {
+      if (rssi >= -55) return '\u2582\u2584\u2586\u2588';  // \u25a1 = empty bar
+      if (rssi >= -65) return '\u2582\u2584\u2586\u25a1';
+      if (rssi >= -75) return '\u2582\u2584\u25a1\u25a1';
+      return '\u2582\u25a1\u25a1\u25a1';
+    }
+
+    function renderWifiScan(nets) {
+      wifiScanNets = nets;
+      var el = document.getElementById('wifiScanResults');
+      var section = document.getElementById('wifiScanSection');
+      section.style.display = 'block';
+      if (!nets.length) {
+        el.innerHTML = '<div class="empty-state">No networks found \u2014 try again or enter SSID manually.</div>';
+        return;
+      }
+      el.innerHTML = '<ul>' + nets.map(function(n, i) {
+        var lock = n.secure ? '<span class="pill info">Secured</span>' : '<span class="pill ok">Open</span>';
+        var bars = '<span class="mono">' + wifiSignalBars(n.rssi) + ' ' + n.rssi + '\u202FdBm</span>';
+        return '<li onclick="selectWifiNetwork(' + i + ')" style="cursor:pointer">' +
+               '<div style="min-width:0;flex:1"><strong>' + n.ssid + '</strong>&nbsp;' + lock +
+               '<div>' + bars + '</div></div>' +
+               '<div class="actions"><button onclick="event.stopPropagation();selectWifiNetwork(' + i + ')">Use</button></div></li>';
+      }).join('') + '</ul>';
+    }
+
+    function selectWifiNetwork(idx) {
+      var net = wifiScanNets[idx];
+      if (!net) return;
+      document.getElementById('wifiSsidInput').value = net.ssid;
+      document.getElementById('wifiPwdInput').focus();
+      document.getElementById('wifiScanSection').style.display = 'none';
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Base URLs Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬

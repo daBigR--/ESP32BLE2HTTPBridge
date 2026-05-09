@@ -17,6 +17,7 @@
 //   GET /config/setsleeptimeout — set inactivity deep-sleep timeout (?ms=)
 //   GET /config/setmapping   — add or update a sig→url mapping (?sig=&url=&label=)
 //   GET /config/delmapping   — remove a mapping (?sig=<hex>)
+//   GET /wifi/scan           — scan visible WiFi networks, return JSON array
 //   GET /reboot              — respond 200, then ESP.restart()
 //   GET /factory-reset       — wipe NVS + BLE bonds, then restart
 // =============================================================================
