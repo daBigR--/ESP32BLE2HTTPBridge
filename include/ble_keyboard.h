@@ -118,6 +118,12 @@ void setReconnectMode(bool runMode);
 // connection (e.g. HTTP /connect) to bypass pending backoff.
 void resetReconnectState();
 
+// Perform one immediate connect attempt to the preferred bonded device,
+// bypassing the backoff schedule.  On success onConnect() resets backoff
+// normally; on failure backoff state is untouched and resumes as scheduled.
+// Returns true on success.
+bool tryConnectNow();
+
 // Checks NimBLE's live connection state and updates the cached isConnected flag.
 // Detects unexpected disconnections (e.g. keyboard powered off) so that the
 // LED logic and main loop see the change immediately.

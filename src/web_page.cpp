@@ -205,7 +205,9 @@ const char PAGE[] PROGMEM = R"HTML(
     }
     button.alt  { background: #6b7f75; }
     button.warn { background: var(--warn); }
-    .btn-flash-saved { background: var(--ok) !important; }
+    .btn-flash-saved { background: var(--ok) !important; color: #fff !important; }
+    .btn-flash-busy  { background: #fff8e6 !important; color: #c07a00 !important; }
+    .btn-flash-error { background: var(--warn) !important; color: #fff !important; }
 
     /* Ã¢â€â‚¬Ã¢â€â‚¬ Lists Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
     ul { list-style: none; margin: 0; padding: 0; }
@@ -366,8 +368,8 @@ const char PAGE[] PROGMEM = R"HTML(
         <h2>WiFi Networks</h2>
         <div class="cfg-section">
           <div class="row" style="gap:8px;margin-bottom:8px">
-            <input type="text" id="wifiSsidInput" placeholder="SSID" style="flex:1" />
-            <input type="text" id="wifiPwdInput" placeholder="Password" style="flex:1" />
+            <input type="text" id="wifiSsidInput" placeholder="SSID" style="flex:1" autocapitalize="none" autocorrect="off" />
+            <input type="text" id="wifiPwdInput" placeholder="Password" style="flex:1" autocapitalize="none" autocorrect="off" />
             <button onclick="addWifi()">Add</button>
           </div>
           <div class="row" style="margin-bottom:8px">
@@ -412,7 +414,7 @@ const char PAGE[] PROGMEM = R"HTML(
         <div class="cfg-section" style="margin-bottom:0">
           <div style="font-size:0.82rem;color:var(--muted);margin-bottom:6px">In run mode button short press cycles base URLs, double press saves the selection.</div>
           <div class="row" style="gap:8px;margin-bottom:8px">
-            <input type="text" id="newUrlInput" placeholder="http://192.168.x.x:8080" style="flex:1" />
+            <input type="text" id="newUrlInput" placeholder="http://192.168.x.x:8080" style="flex:1" autocapitalize="none" autocorrect="off" />
             <button id="urlActionBtn" onclick="addUrl()">Add</button>
             <button id="urlCancelBtn" class="alt" onclick="cancelUrlEdit()" style="display:none">Cancel</button>
           </div>
@@ -428,8 +430,8 @@ const char PAGE[] PROGMEM = R"HTML(
             <span class="captured-box" id="capturedKey">&mdash;</span>
           </div>
           <div class="row" style="gap:8px;margin-bottom:6px">
-            <input type="text" id="mappingUrl" placeholder="/event/1" style="flex:2" />
-            <input type="text" id="mappingLabel" placeholder="Label (optional)" style="flex:1" />
+            <input type="text" id="mappingUrl" placeholder="/event/1" style="flex:2" autocapitalize="none" autocorrect="off" />
+            <input type="text" id="mappingLabel" placeholder="Label (optional)" style="flex:1" autocapitalize="none" autocorrect="off" />
             <button id="assignBtn" onclick="saveMapping()" disabled>Assign</button>
             <button id="mappingCancelBtn" class="alt" onclick="cancelMappingEdit()" style="display:none">Cancel</button>
           </div>
@@ -691,6 +693,8 @@ const char PAGE[] PROGMEM = R"HTML(
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Header update Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    var gConnectFlashing = false;
+
     function updateHeader(s) {
       var dot    = document.getElementById('statusDot');
       var nameEl = document.getElementById('bondedName');
@@ -698,21 +702,52 @@ const char PAGE[] PROGMEM = R"HTML(
       if (!s.bondedAddress) {
         dot.className    = 'dot dot-none';
         nameEl.textContent = 'No device bonded';
-        btn.style.display  = 'none';
+        if (!gConnectFlashing) btn.style.display  = 'none';
         return;
       }
       nameEl.textContent = s.bondedName || s.bondedAddress;
       if (s.connected) {
         dot.className  = 'dot dot-connected';
-        btn.style.display = 'none';
+        if (!gConnectFlashing) btn.style.display = 'none';
       } else {
         dot.className  = 'dot dot-bonded';
-        btn.style.display = '';
+        if (!gConnectFlashing) btn.style.display = '';
       }
     }
 
-    function connectBonded() {
-      if (currentBondedAddress) connectDevice(currentBondedAddress, currentBondedName);
+    async function connectBonded() {
+      if (!currentBondedAddress) return;
+      var btn = document.getElementById('connectBtn');
+      gConnectFlashing = true;
+      btn.textContent = 'Connecting…';
+      btn.classList.add('btn-flash-busy');
+      btn.style.display = '';
+      btn.disabled = true;
+      var r = await fetch('/connect?addr=' + encodeURIComponent(currentBondedAddress) + '&name=' + encodeURIComponent(currentBondedName));
+      var data = await r.json();
+      btn.classList.remove('btn-flash-busy');
+      if (data.ok) {
+        btn.textContent = 'Connected';
+        btn.style.display = '';
+        btn.classList.add('btn-flash-saved');
+        setTimeout(function() {
+          btn.textContent = 'Connect';
+          btn.classList.remove('btn-flash-saved');
+          btn.disabled = false;
+          gConnectFlashing = false;
+          refreshState();
+        }, 2000);
+      } else {
+        btn.textContent = 'Failed';
+        btn.style.display = '';
+        btn.classList.add('btn-flash-error');
+        setTimeout(function() {
+          btn.textContent = 'Connect';
+          btn.classList.remove('btn-flash-error');
+          btn.disabled = false;
+          gConnectFlashing = false;
+        }, 2000);
+      }
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ BLE device actions Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬

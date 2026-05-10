@@ -105,7 +105,7 @@
 ## Firmware
 
 - [ ] **Battery monitoring**: add ADC voltage divider circuit so firmware can read and
-      report battery level, and support low-battery behavior (e.g. warning in UI,
+      report battery level, and support low-battery behaviour (e.g. warning in UI,
       auto-sleep).
 
 - [ ] **Multi-bond support**: remove the single-bond-slot limitation. Allow multiple
@@ -127,7 +127,7 @@
       a spurious reboot on release. A one-time "wait for release" guard at first
       call would fix this. Not observed in practice yet — revisit if it surfaces.
 
-- [ ] **Per-mapping** "Test this mapping" button — fires the URL on demand using test
+- [ ] **Per-mapping testing** "Test this mapping" button — fires the URL on demand using test
       mode's STA path, shows response inline.
 	  
 - [ ] **Revaluate always visible header**:necessary.  add more info?

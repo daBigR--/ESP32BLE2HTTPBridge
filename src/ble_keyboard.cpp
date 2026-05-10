@@ -1220,7 +1220,8 @@ void resetReconnectState() {
 // via the advertised target.  If not found, falls through to a direct-address
 // connection attempt (some peripherals stop advertising after bonding).
 // Returns true on success, false on failure.
-static bool doConnect() {
+// Not static so tryConnectNow() can call it directly.
+bool doConnect() {
   NimBLEScan* scan = NimBLEDevice::getScan();
   scan->setInterval(80);
   scan->setWindow(40);
@@ -1356,6 +1357,20 @@ void maybeAutoConnectBondedKeyboard() {
     gRetryArmed  = true;
   }
   // On success, onConnect() resets gRetryArmed and counters.
+}
+
+// ---------------------------------------------------------------------------
+// tryConnectNow — user-initiated immediate connect attempt (RUN mode button)
+// ---------------------------------------------------------------------------
+// Calls doConnect() immediately, bypassing the backoff schedule.
+// On success: onConnect() resets backoff state normally.
+// On failure: backoff state is untouched — the existing retry schedule resumes.
+bool tryConnectNow() {
+  if (gPreferredBondedAddress.length() == 0) return false;
+  addKeyLog("[BTN] manual connect attempt");
+  bool ok = doConnect();
+  if (!ok) addKeyLog("[BTN] manual connect failed, resuming backoff schedule");
+  return ok;
 }
 
 // ---------------------------------------------------------------------------

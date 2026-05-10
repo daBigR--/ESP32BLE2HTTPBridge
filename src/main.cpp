@@ -480,8 +480,15 @@ void handleButton() {
         saveSelectedUrl();
         gBtnState = BTN_WAIT_SECOND_RELEASE;
       } else if (now - gBtnReleaseMs >= URL_BTN_DOUBLE_WINDOW_MS) {
-        // Window expired with no second press — confirmed single press
-        cycleUrl();
+        // Window expired with no second press — confirmed single press.
+        // If BLE is connected: cycle the base URL (original behavior).
+        // If not connected: attempt an immediate reconnect; backoff schedule
+        // resumes unchanged if the attempt fails.
+        if (BLEKeyboard::isConnected()) {
+          cycleUrl();
+        } else {
+          BLEKeyboard::tryConnectNow();
+        }
         gBtnState = BTN_IDLE;
       }
       break;
