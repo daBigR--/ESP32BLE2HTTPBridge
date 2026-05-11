@@ -211,6 +211,9 @@ static const unsigned long URL_BTN_DOUBLE_WINDOW_MS     =  400;
 // D1 rapid-blink half-period while button is held in the long-press zone
 // (between LONG_PRESS_MS and EXTRA_LONG_PRESS_MS).  100 ms → 5 Hz blink.
 static const unsigned long BLE_HOLD_BLINK_HALF_MS = 100;
+// D1 rapid-blink half-period while a BLE connect attempt is in flight.
+// 100 ms → 5 Hz, same rate as the long-press hold blink.
+static const unsigned long BLE_CONNECTING_BLINK_HALF_MS = 100;
 
 // ---------------------------------------------------------------------------
 // LED state shared between event callbacks and the LED task
@@ -605,6 +608,13 @@ void updateStatusLeds() {
     unsigned long cycle   = BLE_KEY_BLINK_OFF_MS + BLE_KEY_BLINK_ON_MS;
     unsigned long phase   = elapsed % cycle;   // 0 … cycle-1
     bleLedOn = phase >= BLE_KEY_BLINK_OFF_MS;  // OFF in [0, off_ms), ON in [off_ms, cycle)
+  }
+
+  // Connecting blink: while a reconnect attempt is in flight and BLE is not
+  // yet connected, rapid-blink D1 so the user can tell the device is trying.
+  // Cleared automatically to OFF when the attempt finishes without success.
+  if (!bleConnected && BLEKeyboard::isConnecting()) {
+    bleLedOn = (now / BLE_CONNECTING_BLINK_HALF_MS) % 2 == 0;
   }
 
   // Hold-state override: while D10 is held past LONG_PRESS_MS the button handler

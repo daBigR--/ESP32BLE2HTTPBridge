@@ -121,6 +121,9 @@ int  gBootAttemptCount     = 0;
 bool gDisconnectSeen       = false;
 // Reconnect scheduling is active when true.
 bool gRetryArmed           = false;
+// true while a connect attempt (scan + connectToKeyboard) is in flight.
+// Read by main.cpp LED task to show a rapid-blink "connecting" indication.
+bool gConnecting           = false;
 
 // When false, maybeAutoConnectBondedKeyboard() is a no-op.  Disabled by the
 // web UI /scan handler to prevent scanner contention; re-enabled automatically
@@ -1222,6 +1225,7 @@ void resetReconnectState() {
 // Returns true on success, false on failure.
 // Not static so tryConnectNow() can call it directly.
 bool doConnect() {
+  gConnecting = true;
   NimBLEScan* scan = NimBLEDevice::getScan();
   scan->setInterval(80);
   scan->setWindow(40);
@@ -1248,6 +1252,7 @@ bool doConnect() {
     addKeyLog(String("Auto-connecting to bonded keyboard: ") + found);
     bool ok = connectToKeyboard(found, name, target);
     if (!ok) addKeyLog("Auto-connect failed");
+    gConnecting = false;
     return ok;
   }
 
@@ -1257,6 +1262,7 @@ bool doConnect() {
   addKeyLog("Preferred device not in scan, attempting direct connect");
   bool ok = connectToKeyboard(gPreferredBondedAddress, gPreferredBondedName, nullptr);
   if (!ok) addKeyLog("Auto-connect (direct) failed");
+  gConnecting = false;
   return ok;
 }
 
@@ -1281,14 +1287,12 @@ void maybeAutoConnectBondedKeyboard() {
   // A freshly paired device gets one immediate attempt regardless of policy.
   if (gPendingReconnectAddress.length() > 0) {
     addKeyLog(String("[RECON] post-pair connect: ") + gPendingReconnectAddress);
-    if (connectToKeyboard(gPendingReconnectAddress, gPendingReconnectName)) {
-      gPendingReconnectAddress = "";
-      gPendingReconnectName    = "";
-    } else {
-      addKeyLog("[RECON] post-pair connect failed");
-      gPendingReconnectAddress = "";
-      gPendingReconnectName    = "";
-    }
+    gConnecting = true;
+    bool postOk = connectToKeyboard(gPendingReconnectAddress, gPendingReconnectName);
+    gConnecting = false;
+    gPendingReconnectAddress = "";
+    gPendingReconnectName    = "";
+    if (!postOk) addKeyLog("[RECON] post-pair connect failed");
     return;
   }
 
@@ -1387,6 +1391,7 @@ void syncConnectionState() {
 
 // Simple read-only state accessors used by the web UI status route.
 bool          isConnected()     { return gConnected;        }
+bool          isConnecting()    { return gConnecting;       }
 const String& connectedName()   { return gConnectedName;    }
 const String& connectedAddress(){ return gConnectedAddress; }
 const String& lastSignature()   { return gLastSignature;    }

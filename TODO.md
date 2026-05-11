@@ -116,6 +116,10 @@
       - Short press → reboot (lands in RUN mode when config is complete).
       - RUN-mode button behavior (short = cycle URL, double = save) stays unchanged.
 
+- [x] **Added LED connecting indication**: while in run mode, blink D1 LED rapidly (5 Hz)
+      to signal a BLE connection attempt in progress. LED returns to OFF on failure,
+      solid ON on success.
+
 - [ ] **Eliminate 0000000000 bursts**: it seems they can be completely filtered out
       since no HID device should generate that as valid identifier.
 

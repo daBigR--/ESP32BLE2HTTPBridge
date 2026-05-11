@@ -132,6 +132,10 @@ void syncConnectionState();
 // Returns true if a keyboard is currently connected and BLE encryption is active.
 bool isConnected();
 
+// Returns true while a connect attempt (scan + link setup) is in flight.
+// Used by the LED task to show a rapid-blink indication during reconnection.
+bool isConnecting();
+
 // Display name of the currently connected keyboard, or empty string if none.
 const String& connectedName();
 
