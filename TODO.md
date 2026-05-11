@@ -120,8 +120,10 @@
       to signal a BLE connection attempt in progress. LED returns to OFF on failure,
       solid ON on success.
 
-- [ ] **Eliminate 0000000000 bursts**: it seems they can be completely filtered out
-      since no HID device should generate that as valid identifier.
+- [x] **Eliminate 0000000000 bursts**: all-zero signatures (any length) are filtered
+      at the consumer layer — skipped from URL dispatch, capture feed, and UI
+      detection. A monotonic burst counter (`burstSeq`) was added so repeated
+      presses of the same key are still detected correctly in the UI.
 
 ## Maybes
 

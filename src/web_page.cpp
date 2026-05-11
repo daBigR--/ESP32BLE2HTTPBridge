@@ -1097,6 +1097,7 @@ const char PAGE[] PROGMEM = R"HTML(
     var capturing = false;
     var capturedKeyHex = '';
     var lastSeenKey = '';
+    var lastSeenBurstSeq = 0;
     var mappingEditOriginalKey = '';
 
     function renderMappings(mappings) {
@@ -1131,7 +1132,7 @@ const char PAGE[] PROGMEM = R"HTML(
     }
 
     function checkCapture(lastSig) {
-      if (!lastSig || lastSig === lastSeenKey) return;
+      if (!lastSig) return;
       if (reverseFlowPendingEvent) {
         var ev = reverseFlowPendingEvent;
         reverseFlowPendingEvent = null;
@@ -1612,9 +1613,10 @@ const char PAGE[] PROGMEM = R"HTML(
       elKeys.innerHTML = (s.keys || []).map(function(k) { return '<div>' + k + '</div>'; }).join('');
       elKeys.scrollTop = elKeys.scrollHeight;
 
-      if (s.lastSig && s.lastSig !== lastSeenKey) {
+      if (s.lastSig && s.burstSeq !== lastSeenBurstSeq) {
         checkCapture(s.lastSig);
         lastSeenKey = s.lastSig;
+        lastSeenBurstSeq = s.burstSeq;
       }
 
       var rb = document.getElementById('recentBurstsList');

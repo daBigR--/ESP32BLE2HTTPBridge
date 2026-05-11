@@ -139,6 +139,10 @@ String gPendingReconnectName    = "";
 // Last burst signature received via HID notification (exposed through
 // lastSignature() for the web UI status endpoint).
 String gLastSignature = "";
+// Monotonic counter incremented on every non-zero burst.  Exposed via burstSeq()
+// so the web UI can detect same-key repeated presses (signature unchanged but
+// counter advances), which pure string comparison cannot detect.
+uint32_t gBurstSeq = 0;
 
 // Recent burst event ring (last 10 events, for the web UI feed).
 // Written from the NimBLE notification task, read from the HTTP server task.
@@ -244,6 +248,17 @@ bool trySecurityUpgradeWithTimeout();
 // registered handler.  Only one code per notification is forwarded to
 // keep the upstream queue simple; chords are rare on a media remote.
 
+// Returns true if sig is non-empty and consists entirely of '0' characters.
+// HID "no keys pressed" (release) reports always produce an all-zero signature;
+// they are never meaningful user input and should be suppressed at the consumer layer.
+static bool isAllZeroSignature(const String& sig) {
+  if (sig.length() == 0) return false;
+  for (size_t i = 0; i < sig.length(); i++) {
+    if (sig[i] != '0') return false;
+  }
+  return true;
+}
+
 // Build a lowercase hex string from a byte array (no separators).
 // e.g. {0x03, 0x7f, 0x7f} -> "037f7f"
 static String bytesToHexString(const uint8_t* data, size_t len) {
@@ -274,15 +289,20 @@ static void notifyCallback(NimBLERemoteCharacteristic* pRemoteCharacteristic,
   String signature = bytesToHexString(pData, length);
   if (isNewBurst) {
     addKeyLog(String("[BURST] new burst gap=") + String(gap) + "ms payload=" + signature);
-    gLastSignature = signature;
-    // Add to recent sigs ring.
-    if (gRecentSigs.size() >= MAX_RECENT_SIGS) {
-      gRecentSigs.erase(gRecentSigs.begin());
-    }
-    gRecentSigs.push_back({signature, gConnectedName, now});
-    // Dispatch to URL layer.
-    if (gKeyPressFn) {
-      gKeyPressFn(signature);
+    if (isAllZeroSignature(signature)) {
+      addKeyLog(String("[BURST] ignoring all-zero signature: ") + signature);
+    } else {
+      gLastSignature = signature;
+      gBurstSeq++;
+      // Add to recent sigs ring (capture feed).
+      if (gRecentSigs.size() >= MAX_RECENT_SIGS) {
+        gRecentSigs.erase(gRecentSigs.begin());
+      }
+      gRecentSigs.push_back({signature, gConnectedName, now});
+      // Dispatch to URL layer.
+      if (gKeyPressFn) {
+        gKeyPressFn(signature);
+      }
     }
     // Keep KEY 0x... log line for debugging visibility (not used for URL dispatch).
     for (int i = 2; i < (int)length && i < 8; i++) {
@@ -1392,6 +1412,7 @@ void syncConnectionState() {
 // Simple read-only state accessors used by the web UI status route.
 bool          isConnected()     { return gConnected;        }
 bool          isConnecting()    { return gConnecting;       }
+uint32_t      burstSeq()        { return gBurstSeq;         }
 const String& connectedName()   { return gConnectedName;    }
 const String& connectedAddress(){ return gConnectedAddress; }
 const String& lastSignature()   { return gLastSignature;    }

@@ -136,6 +136,10 @@ bool isConnected();
 // Used by the LED task to show a rapid-blink indication during reconnection.
 bool isConnecting();
 
+// Monotonic counter incremented on every non-zero burst.  The web UI uses
+// this to detect repeated presses of the same key (signature unchanged).
+uint32_t burstSeq();
+
 // Display name of the currently connected keyboard, or empty string if none.
 const String& connectedName();
 

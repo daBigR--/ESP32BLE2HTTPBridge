@@ -131,6 +131,7 @@ void registerRoutes(WebServer& server) {
     out += ",\"bondedAddress\":\"" + JsonUtil::escape(BLEKeyboard::preferredBondedAddress()) + "\"";
     out += ",\"bondedName\":\"" + JsonUtil::escape(BLEKeyboard::preferredBondedName())     + "\"";
     out += ",\"lastSig\":\""   + JsonUtil::escape(BLEKeyboard::lastSignature())           + "\"";
+    out += ",\"burstSeq\":"    + String(BLEKeyboard::burstSeq());
     out += ",\"recentSigs\":"  + BLEKeyboard::recentSigsJson();
     out += ",\"keys\":" + KeyLog::toJson();
     out += "}";
