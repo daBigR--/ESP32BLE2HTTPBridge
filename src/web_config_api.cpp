@@ -30,6 +30,10 @@
 #include <WiFi.h>
 #include <algorithm>
 
+#include "apsta.h"
+#include "json_util.h"
+#include "net_fetch.h"
+
 namespace WebConfigApi {
 
 void registerRoutes(WebServer& server, const Context& ctx) {
@@ -281,19 +285,13 @@ void registerRoutes(WebServer& server, const Context& ctx) {
   // Hidden networks (empty SSID) and duplicates are filtered out.
   // Each result: {"ssid":"...","rssi":-52,"secure":true}
   server.on("/wifi/scan", HTTP_GET, [ctx, &server]() {
-    // Enable STA interface alongside AP so WiFi.scanNetworks() works.
-    wifi_mode_t prevMode = WiFi.getMode();
-    if (prevMode == WIFI_MODE_AP) {
-      WiFi.mode(WIFI_MODE_APSTA);
-    }
+    // withStaInterface enables APSTA for the scan duration, then restores
+    // AP-only mode.  The entire scan + response is run inside the lambda so
+    // the mode is always restored even on early return (e.g., scan failure).
+    Apsta::withStaInterface([&]() {
 
     // Synchronous scan — blocks until complete (typically 2–5 s).
     int n = WiFi.scanNetworks(/*async=*/false, /*show_hidden=*/false);
-
-    // Restore AP-only mode now that the scan is done.
-    if (prevMode == WIFI_MODE_AP) {
-      WiFi.mode(WIFI_MODE_AP);
-    }
 
     if (n < 0) {
       WiFi.scanDelete();
@@ -340,6 +338,92 @@ void registerRoutes(WebServer& server, const Context& ctx) {
     if (ctx.logFn) {
       ctx.logFn(String("WiFi scan: ") + String(results.size()) + String(" networks"));
     }
+    server.send(200, "application/json", json);
+    }); // end Apsta::withStaInterface
+  });
+
+  // ---- GET /diag/sta/connect -----------------------------------------------
+  // Enters transient APSTA mode and connects the STA to the best available
+  // saved WiFi network.  Blocks up to ~12 s (budget shared across networks).
+  // The STA remains connected until /diag/sta/disconnect is called.
+  // Response: {"ok":true,"ssid":"<name>","ip":"<addr>"}
+  //           {"ok":false,"error":"<reason>"}
+  server.on("/diag/sta/connect", HTTP_GET, [ctx, &server]() {
+    auto res = Apsta::enterApsta(*ctx.wifiNetworks);
+    if (res.success) {
+      String ssidEsc = JsonUtil::escape(res.ssid);
+      server.send(200, "application/json",
+        String("{\"ok\":true,\"ssid\":\"") + ssidEsc
+        + String("\",\"ip\":\"") + res.ip + String("\"}"));
+    } else {
+      String errEsc = JsonUtil::escape(res.error);
+      server.send(200, "application/json",
+        String("{\"ok\":false,\"error\":\"") + errEsc + String("\"}"));
+    }
+  });
+
+  // ---- GET /diag/sta/disconnect -------------------------------------------
+  // Disconnects the STA and returns to AP-only mode.  Safe to call at any
+  // time; no-op if already in AP-only mode.
+  server.on("/diag/sta/disconnect", HTTP_GET, [&server]() {
+    Apsta::exitApsta();
+    server.send(200, "application/json", "{\"ok\":true}");
+  });
+
+  // ---- GET /diag/fetch?url=<value> -----------------------------------------
+  // Enters APSTA, performs an HTTP GET of the given URL, exits APSTA, and
+  // returns the result.  Blocks up to ~17 s (12 s connect + 5 s fetch).
+  // URL must start with http:// or https://.
+  // Response body is capped at NetFetch::MAX_BODY_BYTES (200 KB) internally;
+  // only 2 KB is forwarded in the JSON to keep the browser response small.
+  // Response: {"ok":<bool>,"status":<int>,"body":"<esc>","truncated":<bool>,"error":"<esc>"}
+  server.on("/diag/fetch", HTTP_GET, [ctx, &server]() {
+    if (!server.hasArg("url")) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing url\"}");
+      return;
+    }
+    String url = server.arg("url");
+    if (url.length() == 0 ||
+        (!url.startsWith("http://") && !url.startsWith("https://"))) {
+      server.send(400, "application/json",
+        "{\"ok\":false,\"error\":\"url must start with http:// or https://\"}");
+      return;
+    }
+
+    // Enter APSTA and connect to saved network.
+    auto conn = Apsta::enterApsta(*ctx.wifiNetworks);
+    if (!conn.success) {
+      String errEsc = JsonUtil::escape(conn.error);
+      server.send(200, "application/json",
+        String("{\"ok\":false,\"error\":\"STA connect: ") + errEsc + String("\"}"));
+      // enterApsta already restored AP-only on failure — no exitApsta needed.
+      return;
+    }
+
+    // Perform the GET.
+    NetFetch::HttpResponse resp = NetFetch::httpGet(url);
+
+    // Always exit APSTA after the fetch completes (or fails).
+    Apsta::exitApsta();
+
+    // Truncate body to 2 KB for the JSON response (UI only shows ~500 chars).
+    // The full body up to 200 KB was already read by httpGet; we just cap here
+    // to keep the browser response small.
+    static const size_t JSON_BODY_CAP = 2048;
+    bool bodyUiTrunc = resp.truncated;
+    if (resp.body.length() > JSON_BODY_CAP) {
+      resp.body    = resp.body.substring(0, JSON_BODY_CAP);
+      bodyUiTrunc  = true;
+    }
+
+    String escapedBody  = JsonUtil::escape(resp.body);
+    String escapedError = JsonUtil::escape(resp.error);
+
+    String json = String("{\"ok\":")          + (resp.success ? "true" : "false")
+                + String(",\"status\":")      + String(resp.status)
+                + String(",\"body\":\"")      + escapedBody + String("\"")
+                + String(",\"truncated\":")   + (bodyUiTrunc ? "true" : "false")
+                + String(",\"error\":\"")     + escapedError + String("\"}");
     server.send(200, "application/json", json);
   });
 

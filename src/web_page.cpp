@@ -459,6 +459,25 @@ const char PAGE[] PROGMEM = R"HTML(
         </div>
       </div>
       <div class="card">
+        <h2>Network Diagnostics</h2>
+        <div style="font-size:0.82rem;color:var(--muted);margin-bottom:10px">Tests outbound connectivity using saved WiFi credentials. Only works in config mode.</div>
+        <div class="cfg-section" style="margin-bottom:12px">
+          <label class="cfg-label">STA Status</label>
+          <div id="diagStaStatus" style="font-family:monospace;font-size:0.85rem;padding:6px 8px;background:#f8faf9;border:1px solid var(--line);border-radius:6px;color:var(--muted)">Not connected</div>
+          <div style="margin-top:8px">
+            <button id="diagConnectBtn" onclick="diagTestConnection()">Test Connection</button>
+          </div>
+        </div>
+        <div class="cfg-section" style="margin-bottom:0">
+          <label class="cfg-label">Test Fetch</label>
+          <div class="row" style="gap:8px;margin-bottom:8px">
+            <input type="url" id="diagFetchUrl" placeholder="http://example.com/" style="flex:1;min-width:0" />
+            <button id="diagFetchBtn" onclick="diagTestFetch()">Fetch</button>
+          </div>
+          <div id="diagFetchResult" style="display:none;font-family:monospace;font-size:0.82rem;padding:8px;background:#f8faf9;border:1px solid var(--line);border-radius:6px;max-height:160px;overflow-y:auto;word-break:break-all;white-space:pre-wrap"></div>
+        </div>
+      </div>
+      <div class="card">
         <h2>Device Control</h2>
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">
           <button onclick="showModal('rebootModal')">&#x21BA; Reboot</button>
@@ -1155,6 +1174,73 @@ const char PAGE[] PROGMEM = R"HTML(
       } catch (e) {
         showModalError('resetModal', 'Factory reset failed. Check connection.');
       }
+    }
+
+    // -- Network Diagnostics (System tab) ------------------------------------
+    // diagTestConnection: briefly enters APSTA + connects STA, auto-disconnects
+    // after 4 s so the user can see the connected state before it cleans up.
+    async function diagTestConnection() {
+      var btn    = document.getElementById('diagConnectBtn');
+      var stEl   = document.getElementById('diagStaStatus');
+      btn.disabled = true;
+      stEl.style.color = 'var(--muted)';
+      stEl.textContent = 'Connecting\u2026';
+      try {
+        var r    = await fetch('/diag/sta/connect');
+        var data = await r.json();
+        if (data.ok) {
+          stEl.style.color = 'var(--ok)';
+          stEl.textContent = 'Connected to ' + data.ssid + ', IP ' + data.ip;
+          // Auto-disconnect after 4 s so we don't leave APSTA mode running.
+          setTimeout(async function() {
+            try { await fetch('/diag/sta/disconnect'); } catch (_) {}
+            stEl.style.color = 'var(--muted)';
+            stEl.textContent = 'Not connected';
+            btn.disabled = false;
+          }, 4000);
+        } else {
+          stEl.style.color = 'var(--warn)';
+          stEl.textContent = 'Connection failed: ' + (data.error || 'unknown error');
+          btn.disabled = false;
+        }
+      } catch (e) {
+        stEl.style.color = 'var(--warn)';
+        stEl.textContent = 'Request error: ' + e.message;
+        btn.disabled = false;
+      }
+    }
+
+    // diagTestFetch: enter APSTA + HTTP GET + exit APSTA, display result inline.
+    async function diagTestFetch() {
+      var urlInput = document.getElementById('diagFetchUrl');
+      var fetchBtn = document.getElementById('diagFetchBtn');
+      var result   = document.getElementById('diagFetchResult');
+      var url = (urlInput.value || '').trim();
+      if (!url) { url = 'http://example.com/'; urlInput.value = url; }
+      fetchBtn.disabled = true;
+      result.style.display = '';
+      result.style.color = 'var(--muted)';
+      result.textContent = 'Fetching ' + url + '\u2026';
+      var t0 = Date.now();
+      try {
+        var r    = await fetch('/diag/fetch?url=' + encodeURIComponent(url));
+        var data = await r.json();
+        var ms   = Date.now() - t0;
+        if (data.ok) {
+          var body = data.body || '';
+          var trailer = data.truncated ? '\n\u2026 [truncated]' : '';
+          if (body.length > 500) { body = body.substring(0, 500); trailer = '\n\u2026 [truncated]'; }
+          result.style.color = 'var(--ink)';
+          result.textContent = 'HTTP ' + data.status + ' \u2014 ' + ms + ' ms\n' + body + trailer;
+        } else {
+          result.style.color = 'var(--warn)';
+          result.textContent = 'Error (' + ms + ' ms): ' + (data.error || 'unknown');
+        }
+      } catch (e) {
+        result.style.color = 'var(--warn)';
+        result.textContent = 'Request error: ' + e.message;
+      }
+      fetchBtn.disabled = false;
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Apply & Run modal Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬

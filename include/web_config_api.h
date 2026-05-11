@@ -20,6 +20,13 @@
 //   GET /wifi/scan           — scan visible WiFi networks, return JSON array
 //   GET /reboot              — respond 200, then ESP.restart()
 //   GET /factory-reset       — wipe NVS + BLE bonds, then restart
+//
+// Diagnostic routes (System tab — infrastructure validation only):
+//   GET /diag/sta/connect    — enter APSTA + connect STA to saved home WiFi
+//                              (blocks up to ~12 s); returns {ok,ssid,ip} or {ok:false,error}
+//   GET /diag/sta/disconnect — disconnect STA, return to AP-only
+//   GET /diag/fetch?url=     — enter APSTA, HTTP GET the URL, exit APSTA;
+//                              returns {ok,status,body,truncated,error}
 // =============================================================================
 
 #include <Arduino.h>
