@@ -1268,6 +1268,7 @@ const char PAGE[] PROGMEM = R"HTML(
         }
         var html = await r.text();
         var events = parseKoreaderEvents(html);
+        console.log('[events] parsed ' + events.length + ' events from ' + html.length + 'B HTML');
         if (events.length) {
           koreaderEvents = events;
         }

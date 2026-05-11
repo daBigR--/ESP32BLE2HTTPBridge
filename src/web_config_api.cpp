@@ -32,6 +32,7 @@
 
 #include "apsta.h"
 #include "json_util.h"
+#include "key_log.h"
 #include "net_fetch.h"
 
 namespace WebConfigApi {
@@ -439,8 +440,11 @@ void registerRoutes(WebServer& server, const Context& ctx) {
     size_t idx = *ctx.selectedUrlIndex;
     if (idx >= ctx.baseUrls->size()) idx = 0;
     String url = (*ctx.baseUrls)[idx];
+    KeyLog::add(String("[EVENTS] proxy fetch start url=") + url);
+    uint32_t t0 = millis();
     auto cr = Apsta::enterApsta(*ctx.wifiNetworks);
     if (!cr.success) {
+      KeyLog::add(String("[EVENTS] proxy fetch failed: ") + cr.error);
       String errJson = String("{\"error\":\"") + JsonUtil::escape(cr.error) + String("\"}" );
       server.send(500, "application/json", errJson);
       return;
@@ -448,10 +452,15 @@ void registerRoutes(WebServer& server, const Context& ctx) {
     auto resp = NetFetch::httpGet(url, 10000);
     Apsta::exitApsta();
     if (!resp.success) {
+      KeyLog::add(String("[EVENTS] proxy fetch failed: ") + resp.error);
       String errJson = String("{\"error\":\"") + JsonUtil::escape(resp.error) + String("\"}" );
       server.send(500, "application/json", errJson);
       return;
     }
+    uint32_t elapsed = millis() - t0;
+    KeyLog::add(String("[EVENTS] proxy fetch ok status=") + String(resp.status)
+                + String(" bytes=") + String(resp.body.length())
+                + String(" elapsed=") + String(elapsed) + String("ms"));
     server.send(200, "text/html", resp.body);
   });
 

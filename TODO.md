@@ -82,18 +82,18 @@
 
 - [ ] **Add test mode in config**: allow the user to press buttons and send them to the configured
       url + action mappings without exiting config mode.  Requires complete configuration:
-	  ssid/pwd, paired device, base URL and at least one action map.  Then switching mode
-	  to AP + STA.  Also a special section to show status of test and exit from test option.
+	ssid/pwd, paired device, base URL and at least one action map.  Then switching mode
+	to AP + STA.  Also a special section to show status of test and exit from test option.
 
 - [x] **Add read-parse /koreader/event page**: besides the user being able to enter 
       an event name directly, implement parsing of KOReader HTTP Inspector page and show
-	  a list of available events to pair with a certain key.  Easier than typing, less
-	  error prone, self validating.  I think still keep manual entry for copy/paste use
-	  or advanced user.  Add search box and allow for reversed flow, instead of user
-	  pressing key then entering string to pair with it, user selects event and then
-	  enters key to pair that event with.  Instead of parsing on the ESP32, have the ESP32
-	  act as a CORS proxy — fetch the KOReader page and forward it to the browser. Then
-	  JavaScript in your config UI does the parsing.
+	a list of available events to pair with a certain key.  Easier than typing, less
+	error prone, self validating.  I think still keep manual entry for copy/paste use
+	or advanced user.  Add search box and allow for reversed flow, instead of user
+	pressing key then entering string to pair with it, user selects event and then
+	enters key to pair that event with.  Instead of parsing on the ESP32, have the ESP32
+	act as a CORS proxy — fetch the KOReader page and forward it to the browser. Then
+	JavaScript in your config UI does the parsing.
 
 ## Cleanup / Tech Debt
 
