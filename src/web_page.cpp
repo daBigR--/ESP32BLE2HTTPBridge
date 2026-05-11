@@ -253,7 +253,7 @@ const char PAGE[] PROGMEM = R"HTML(
       font-size: 0.92rem;
       line-height: 1.35;
     }
-    input[type=text], input[type=number] {
+    input[type=text], input[type=number], input[type=search] {
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 8px 10px;
@@ -334,6 +334,48 @@ const char PAGE[] PROGMEM = R"HTML(
       .tab-btn     { font-size: 0.78rem; padding: 8px 2px 7px; }
       #applyRunBtn { font-size: 0.8rem; padding: 6px 10px; }
       #connectBtn  { font-size: 0.8rem; padding: 6px 10px; }
+    }
+
+    /* -- KOReader event picker -------------------------------------------- */
+    .picker-panel {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f8faf9;
+      padding: 10px;
+      margin-top: 10px;
+    }
+    .picker-event-row {
+      padding: 8px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--line);
+    }
+    .picker-event-row:last-child { border-bottom: none; }
+    .picker-event-row:hover { background: #e8f2ee; }
+    .picker-section-hdr {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 700;
+      font-size: 0.9rem;
+      padding: 7px 10px;
+      cursor: pointer;
+      background: #eef4f1;
+      border-radius: 8px;
+      margin-top: 4px;
+      user-select: none;
+    }
+    .reverse-flow-status {
+      background: #fff8e6;
+      border: 1px solid #e0c060;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 0.9rem;
+      color: #7a5c00;
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
   </style>
 </head>
@@ -425,15 +467,29 @@ const char PAGE[] PROGMEM = R"HTML(
       <div class="card">
         <h2>Assign a Button</h2>
         <div class="cfg-section">
-          <div class="row" style="margin-bottom:8px;gap:8px">
+          <div class="row" style="gap:8px;margin-bottom:6px;flex-wrap:wrap">
             <button id="captureBtn" onclick="startCapture()">Capture Key</button>
             <span class="captured-box" id="capturedKey">&mdash;</span>
-          </div>
-          <div class="row" style="gap:8px;margin-bottom:6px">
-            <input type="text" id="mappingUrl" placeholder="/event/1" style="flex:2" autocapitalize="none" autocorrect="off" />
-            <input type="text" id="mappingLabel" placeholder="Label (optional)" style="flex:1" autocapitalize="none" autocorrect="off" />
+            <input type="text" id="mappingUrl" placeholder="/event/1" style="flex:2;min-width:120px" autocapitalize="none" autocorrect="off" />
+            <input type="text" id="mappingLabel" placeholder="Label (optional)" style="flex:1;min-width:100px" autocapitalize="none" autocorrect="off" />
             <button id="assignBtn" onclick="saveMapping()" disabled>Assign</button>
             <button id="mappingCancelBtn" class="alt" onclick="cancelMappingEdit()" style="display:none">Cancel</button>
+          </div>
+          <div class="row" style="margin-bottom:8px">
+            <button onclick="openEventPicker('reverse')">Scan Events</button>
+          </div>
+          <div id="reverseFlowStatus" class="reverse-flow-status" style="display:none">
+            <span style="flex:1">Press a button on the connected BLE device to bind to <strong><span id="reverseFlowEventName"></span></strong>.</span>
+            <button class="alt" onclick="cancelReverseFlow()" style="white-space:nowrap">Cancel</button>
+          </div>
+          <div id="eventPickerPanel" class="picker-panel" style="display:none">
+            <div class="row" style="gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap">
+              <input type="search" id="pickerSearch" placeholder="Search events&hellip;" style="flex:1;min-width:140px" oninput="renderPickerEvents(this.value)" />
+              <button id="pickerRefreshBtn" class="alt" onclick="fetchPickerEvents()">Refresh</button>
+              <span id="pickerCachedBadge" class="pill info" style="display:none">cached</span>
+              <button class="alt" onclick="closeEventPicker()">Close</button>
+            </div>
+            <div id="eventPickerList" style="max-height:320px;overflow-y:auto"></div>
           </div>
         </div>
         <div class="cfg-section" style="margin-bottom:0">
@@ -975,6 +1031,8 @@ const char PAGE[] PROGMEM = R"HTML(
         var r = await fetch('/config/selecturl?idx=' + idx);
         var data = await r.json();
         if (!data.ok) { showInlineError('urlError', data.error || 'Failed to activate URL.'); return; }
+        koreaderEvents = null;
+        console.log('[events] cache: cleared (base URL changed)');
         await loadConfig();
       } catch (e) {
         showInlineError('urlError', 'Failed to activate URL. Check connection.');
@@ -994,6 +1052,10 @@ const char PAGE[] PROGMEM = R"HTML(
         }
         var data = await r.json();
         if (!data.ok) { showInlineError('urlError', data.error || 'Save failed.'); return; }
+        if (urlEditIndex >= 0) {
+          koreaderEvents = null;
+          console.log('[events] cache: cleared (base URL changed)');
+        }
         cancelUrlEdit();
         await loadConfig();
       } catch (e) {
@@ -1069,7 +1131,21 @@ const char PAGE[] PROGMEM = R"HTML(
     }
 
     function checkCapture(lastSig) {
-      if (!capturing || !lastSig || lastSig === lastSeenKey) return;
+      if (!lastSig || lastSig === lastSeenKey) return;
+      if (reverseFlowPendingEvent) {
+        var ev = reverseFlowPendingEvent;
+        reverseFlowPendingEvent = null;
+        hideReverseFlowStatus();
+        capturing = false;
+        capturedKeyHex = lastSig;
+        document.getElementById('capturedKey').textContent = lastSig;
+        document.getElementById('mappingUrl').value = ev.path;
+        document.getElementById('mappingLabel').value = ev.label || '';
+        document.getElementById('assignBtn').disabled = false;
+        saveMapping();
+        return;
+      }
+      if (!capturing) return;
       capturing = false;
       capturedKeyHex = lastSig;
       document.getElementById('capturedKey').textContent = lastSig;
@@ -1142,6 +1218,221 @@ const char PAGE[] PROGMEM = R"HTML(
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Load all config Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // -- KOReader Event Picker ----------------------------------------------
+    var koreaderEvents = null;
+    var pickerMode = null;
+    var reverseFlowPendingEvent = null;
+    var currentBleConnected = false;
+
+    function openEventPicker(mode) {
+      if (mode === 'reverse' && !currentBleConnected) {
+        showInlineError('mappingError', 'Connect a BLE device first.');
+        return;
+      }
+      pickerMode = mode;
+      document.getElementById('eventPickerPanel').style.display = '';
+      if (koreaderEvents && koreaderEvents.length) {
+        console.log('[events] cache: hit (' + koreaderEvents.length + ' events)');
+        document.getElementById('pickerCachedBadge').style.display = '';
+        renderPickerEvents('');
+      } else {
+        console.log('[events] cache: miss, fetching');
+        fetchPickerEvents();
+      }
+    }
+
+    function closeEventPicker() {
+      document.getElementById('eventPickerPanel').style.display = 'none';
+      var s = document.getElementById('pickerSearch');
+      if (s) s.value = '';
+      pickerMode = null;
+    }
+
+    async function fetchPickerEvents() {
+      var refreshBtn = document.getElementById('pickerRefreshBtn');
+      var list = document.getElementById('eventPickerList');
+      if (koreaderEvents) {
+        console.log('[events] cache: refresh requested');
+        koreaderEvents = null;
+      }
+      refreshBtn.disabled = true;
+      list.textContent = 'Fetching events from KOReader\u2026';
+      document.getElementById('pickerCachedBadge').style.display = 'none';
+      try {
+        var r = await fetch('/koreader/events_page');
+        if (!r.ok) {
+          var errData = await r.json().catch(function() { return {}; });
+          list.textContent = 'Error: ' + (errData.error || ('HTTP ' + r.status));
+          refreshBtn.disabled = false;
+          return;
+        }
+        var html = await r.text();
+        var events = parseKoreaderEvents(html);
+        if (events.length) {
+          koreaderEvents = events;
+        }
+        renderPickerEvents(document.getElementById('pickerSearch').value || '');
+      } catch(e) {
+        list.textContent = 'Fetch error: ' + e.message;
+      }
+      refreshBtn.disabled = false;
+    }
+
+    function parseKoreaderEvents(html) {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const root = doc.querySelector('pre') || doc.body;
+
+      const events = [];
+      let section = '';
+      let label = '';
+      let contextual = false;
+      let lastWasA = false;
+      let lastAContextual = false;
+
+      for (const node of root.childNodes) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          if (node.textContent.includes('\n')) lastWasA = false;
+          continue;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+
+        const tag = node.tagName.toLowerCase();
+
+        if (tag === 'big') {
+          section = node.textContent.trim();
+          lastWasA = false;
+          continue;
+        }
+
+        if (tag === 'b') {
+          if (lastWasA && !lastAContextual && events.length > 0) {
+            events[events.length - 1].modifier = node.textContent.trim();
+          } else if (!lastWasA) {
+            contextual = /color:\s*dimgray/i.test(node.innerHTML || '');
+            label = node.textContent.replace(/\s+/g, ' ').trim();
+          }
+          lastWasA = false;
+          continue;
+        }
+
+        if (tag === 'a') {
+          const href = node.getAttribute('href') || '';
+          if (href.includes('/koreader/event/')) {
+            if (!contextual) {
+              const fullPath = (href.match(/\/koreader\/event\/.*$/) || [href])[0];
+              const path = fullPath.replace(/^\/koreader\/event\//, '');
+              events.push({ section, label, modifier: '', path });
+              lastAContextual = false;
+            } else {
+              lastAContextual = true;
+            }
+            lastWasA = true;
+          } else {
+            lastWasA = false;
+          }
+          continue;
+        }
+
+        lastWasA = false;
+      }
+
+      return events;
+    }
+
+    function renderPickerEvents(query) {
+      var list = document.getElementById('eventPickerList');
+      if (!koreaderEvents || !koreaderEvents.length) {
+        list.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:0.9rem">No events found.</div>';
+        return;
+      }
+      var q = (query || '').toLowerCase().trim();
+      var html = '';
+      if (q) {
+        var filtered = koreaderEvents.filter(function(ev) {
+          return (ev.label + ' ' + ev.modifier + ' ' + ev.section).toLowerCase().indexOf(q) >= 0;
+        });
+        if (!filtered.length) {
+          list.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:0.9rem">No matches.</div>';
+          return;
+        }
+        html = filtered.map(function(ev) {
+          var modPart = ev.modifier ? ' \u2014 ' + ev.modifier : '';
+          return '<div class="picker-event-row" onclick="pickerSelectEvent(\'' +
+            encodeURIComponent(ev.path) + '\',\'' + encodeURIComponent(ev.label) + '\',\'' + encodeURIComponent(ev.modifier) + '\')">'+
+            '<div><strong>' + htmlEsc(ev.label) + htmlEsc(modPart) + '</strong>' +
+            ' <span style="font-size:0.75rem;color:var(--muted)">[' + htmlEsc(ev.section) + ']</span></div>' +
+            '<div class="mono" style="font-size:0.78rem;color:var(--muted)">' + htmlEsc(ev.path) + '</div>' +
+            '</div>';
+        }).join('');
+      } else {
+        var sections = [];
+        var sectionMap = {};
+        koreaderEvents.forEach(function(ev) {
+          if (!sectionMap[ev.section]) { sectionMap[ev.section] = []; sections.push(ev.section); }
+          sectionMap[ev.section].push(ev);
+        });
+        var defaultExpanded = ['General', 'Device'];
+        html = sections.map(function(sec) {
+          var evs = sectionMap[sec];
+          var expanded = defaultExpanded.indexOf(sec) >= 0;
+          var bodyId = 'pks_' + sec.replace(/\W+/g, '_');
+          var rows = evs.map(function(ev) {
+            var modPart = ev.modifier ? ' \u2014 ' + ev.modifier : '';
+            return '<div class="picker-event-row" onclick="pickerSelectEvent(\'' +
+              encodeURIComponent(ev.path) + '\',\'' + encodeURIComponent(ev.label) + '\',\'' + encodeURIComponent(ev.modifier) + '\')">'+
+              '<div><strong>' + htmlEsc(ev.label) + htmlEsc(modPart) + '</strong></div>' +
+              '<div class="mono" style="font-size:0.78rem;color:var(--muted)">' + htmlEsc(ev.path) + '</div>' +
+              '</div>';
+          }).join('');
+          return '<div class="picker-section-hdr" onclick="togglePickerSection(\'' + bodyId + '\')">'+
+            '<span>' + htmlEsc(sec) + ' <span style="color:var(--muted);font-weight:500;font-size:0.82rem">(' + evs.length + ')</span></span>' +
+            '<span id="' + bodyId + '-arrow">' + (expanded ? '\u25BE' : '\u25B8') + '</span>' +
+            '</div>' +
+            '<div id="' + bodyId + '" style="display:' + (expanded ? 'block' : 'none') + '">' + rows + '</div>';
+        }).join('');
+      }
+      list.innerHTML = html;
+    }
+
+    function togglePickerSection(bodyId) {
+      var el = document.getElementById(bodyId);
+      var arrow = document.getElementById(bodyId + '-arrow');
+      if (!el) return;
+      var open = el.style.display !== 'none';
+      el.style.display = open ? 'none' : 'block';
+      if (arrow) arrow.textContent = open ? '\u25B8' : '\u25BE';
+    }
+
+    function pickerSelectEvent(encodedPath, encodedLabel, encodedModifier) {
+      var path = decodeURIComponent(encodedPath);
+      var label = decodeURIComponent(encodedLabel);
+      var modifier = decodeURIComponent(encodedModifier);
+      var displayLabel = label + (modifier ? ' \u2014 ' + modifier : '');
+      if (pickerMode === 'reverse') {
+        reverseFlowPendingEvent = { path: path, label: displayLabel };
+        closeEventPicker();
+        showReverseFlowStatus(displayLabel);
+      }
+    }
+
+    function showReverseFlowStatus(eventLabel) {
+      document.getElementById('reverseFlowEventName').textContent = eventLabel;
+      document.getElementById('reverseFlowStatus').style.display = '';
+    }
+
+    function hideReverseFlowStatus() {
+      document.getElementById('reverseFlowStatus').style.display = 'none';
+    }
+
+    function cancelReverseFlow() {
+      reverseFlowPendingEvent = null;
+      hideReverseFlowStatus();
+    }
+
+    function htmlEsc(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
     async function loadConfig() {
       var r = await fetch('/config');
       var c = await r.json();
@@ -1255,7 +1546,7 @@ const char PAGE[] PROGMEM = R"HTML(
     function closeModal(id) { document.getElementById(id).classList.remove('open'); }
     function modalBackdropClick(e, id) { if (e.target === e.currentTarget) closeModal(id); }
     document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') ['applyModal','rebootModal','resetModal'].forEach(closeModal);
+      if (e.key === 'Escape') { ['applyModal','rebootModal','resetModal'].forEach(closeModal); closeEventPicker(); }
     });
     function openApplyModal() { showModal('applyModal'); }
     function closeApplyModal() { closeModal('applyModal'); }
@@ -1312,6 +1603,7 @@ const char PAGE[] PROGMEM = R"HTML(
       var s = await r.json();
       currentBondedAddress = s.bondedAddress || '';
       currentBondedName    = s.bondedName    || '';
+      currentBleConnected  = !!s.connected;
 
       updateHeader(s);
       renderBondedPanel(s);

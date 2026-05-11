@@ -85,7 +85,7 @@
 	  ssid/pwd, paired device, base URL and at least one action map.  Then switching mode
 	  to AP + STA.  Also a special section to show status of test and exit from test option.
 
-- [ ] **Add read-parse /koreader/event page**: besides the user being able to enter 
+- [x] **Add read-parse /koreader/event page**: besides the user being able to enter 
       an event name directly, implement parsing of KOReader HTTP Inspector page and show
 	  a list of available events to pair with a certain key.  Easier than typing, less
 	  error prone, self validating.  I think still keep manual entry for copy/paste use

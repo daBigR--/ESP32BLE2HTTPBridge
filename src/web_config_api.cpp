@@ -427,6 +427,34 @@ void registerRoutes(WebServer& server, const Context& ctx) {
     server.send(200, "application/json", json);
   });
 
+  // ---- GET /koreader/events_page -----------------------------------------
+  // Proxies the KOReader events list from the active base URL so the browser
+  // JS parser can extract events.  Returns the body as-is with text/html.
+  // On failure returns HTTP 500 with JSON {"error":"<reason>"}.
+  server.on("/koreader/events_page", HTTP_GET, [ctx, &server]() {
+    if (ctx.baseUrls->empty()) {
+      server.send(500, "application/json", "{\"error\":\"No base URL configured\"}");
+      return;
+    }
+    size_t idx = *ctx.selectedUrlIndex;
+    if (idx >= ctx.baseUrls->size()) idx = 0;
+    String url = (*ctx.baseUrls)[idx];
+    auto cr = Apsta::enterApsta(*ctx.wifiNetworks);
+    if (!cr.success) {
+      String errJson = String("{\"error\":\"") + JsonUtil::escape(cr.error) + String("\"}" );
+      server.send(500, "application/json", errJson);
+      return;
+    }
+    auto resp = NetFetch::httpGet(url, 10000);
+    Apsta::exitApsta();
+    if (!resp.success) {
+      String errJson = String("{\"error\":\"") + JsonUtil::escape(resp.error) + String("\"}" );
+      server.send(500, "application/json", errJson);
+      return;
+    }
+    server.send(200, "text/html", resp.body);
+  });
+
   // ---- GET /reboot -------------------------------------------------------
   // Responds with 200 OK to let the browser receive the acknowledgement
   // before the device resets.  The 300 ms delay is the minimum needed for

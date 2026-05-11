@@ -27,6 +27,10 @@
 //   GET /diag/sta/disconnect — disconnect STA, return to AP-only
 //   GET /diag/fetch?url=     — enter APSTA, HTTP GET the URL, exit APSTA;
 //                              returns {ok,status,body,truncated,error}
+//
+// KOReader integration:
+//   GET /koreader/events_page  — proxy active base URL; returns text/html on
+//                               success, HTTP 500 + JSON {error} on failure
 // =============================================================================
 
 #include <Arduino.h>
