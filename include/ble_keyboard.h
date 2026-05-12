@@ -98,8 +98,8 @@ bool connectToKeyboard(const String& address, const String& nameHint, NimBLEAdve
 void disconnectKeyboard();
 
 // Called from the main loop once per iteration.  Implements mode-aware
-// reconnect policy: CONFIG mode caps at 2 boot attempts; RUN mode uses
-// exponential backoff (1/5/15/30 s, then 30 s repeating).
+// reconnect policy: CONFIG mode caps at 2 boot attempts; RUN mode uses a
+// bounded aggressive-then-give-up schedule (7 attempts, ~4-5 min wall-clock).
 void maybeAutoConnectBondedKeyboard();
 
 // Enable or disable the auto-connect loop.  Pass false when a web UI scan is
@@ -118,9 +118,10 @@ void setReconnectMode(bool runMode);
 // connection (e.g. HTTP /connect) to bypass pending backoff.
 void resetReconnectState();
 
-// Perform one immediate connect attempt to the preferred bonded device,
-// bypassing the backoff schedule.  On success onConnect() resets backoff
-// normally; on failure backoff state is untouched and resumes as scheduled.
+// Restart the bounded RUN schedule from attempt 1 with trigger="user",
+// regardless of whether the previous schedule was mid-run or exhausted.
+// Fires attempt 1 immediately; on failure the remaining attempts are armed
+// for subsequent maybeAutoConnectBondedKeyboard() calls.
 // Returns true on success.
 bool tryConnectNow();
 

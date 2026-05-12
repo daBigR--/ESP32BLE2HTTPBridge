@@ -95,9 +95,21 @@ String gPreferredBondedName    = "";
 // ---------------------------------------------------------------------------
 // Reconnect policy constants
 // ---------------------------------------------------------------------------
-// RUN mode: exponential-ish backoff steps (ms).  Clamped at the last value.
-static const uint32_t RUN_BACKOFF_MS[]      = {1000, 5000, 15000, 30000};
-static const int      RUN_BACKOFF_COUNT     = (int)(sizeof(RUN_BACKOFF_MS) / sizeof(RUN_BACKOFF_MS[0]));
+// RUN mode: bounded aggressive-then-give-up schedule.
+// Each entry is the wait time AFTER a failed attempt completes, BEFORE the
+// next attempt starts.  Attempt 1 fires immediately (no initial wait).
+// After all RUN_RETRY_COUNT attempts have failed, the scheduler enters
+// EXHAUSTED state and stops until the user presses D10.
+static constexpr uint32_t RUN_RETRY_SCHEDULE_MS[] = {
+    10000,  // 10s wait after attempt 1
+    10000,  // 10s wait after attempt 2
+    10000,  // 10s wait after attempt 3
+    15000,  // 15s wait after attempt 4
+    30000,  // 30s wait after attempt 5
+    60000,  // 60s wait after attempt 6
+    60000,  // 60s wait after attempt 7 — last attempt
+};
+static constexpr int RUN_RETRY_COUNT = (int)(sizeof(RUN_RETRY_SCHEDULE_MS) / sizeof(RUN_RETRY_SCHEDULE_MS[0]));
 // CONFIG mode: at most 2 boot attempts, 5 s apart.  After that, wait for user.
 static const uint32_t CONFIG_BOOT_RETRY_GAP_MS  = 5000;
 static const int      CONFIG_BOOT_MAX_ATTEMPTS  = 2;
@@ -108,16 +120,22 @@ const unsigned long RECONNECT_SECURITY_WAIT_MS = 1200; // bounded wait for async
 // ---------------------------------------------------------------------------
 // Reconnect state
 // ---------------------------------------------------------------------------
-// true = RUN mode (backoff retries); false = CONFIG mode (boot cap then stop).
+// true = RUN mode (bounded schedule); false = CONFIG mode (boot cap then stop).
 bool gRunMode              = false;
 // Scheduled time for the next attempt (millis).  0 = try immediately.
 unsigned long gNextRetryMs = 0;
-// RUN mode backoff step index.  Clamped to RUN_BACKOFF_COUNT-1.
-int  gRunBackoffIndex      = 0;
+// RUN mode: how many attempts have fired in the current schedule run (1-indexed).
+// Reset to 0 on every new trigger (boot, disconnect, D10 press).
+int  gRunAttemptCount      = 0;
+// RUN mode: true when all RUN_RETRY_COUNT attempts have been exhausted without
+// success.  Cleared only by the next trigger.
+bool gRunExhausted         = false;
+// RUN mode: which event started the current schedule run.
+// Values: "boot", "disconnect", "user".  Used only for the first-attempt log.
+String gRunTrigger         = "boot";
 // CONFIG mode: how many boot attempts have fired so far.
 int  gBootAttemptCount     = 0;
-// true once a disconnect (not just boot) has been seen — drives post-disconnect
-// backoff start in RUN mode.
+// true once a disconnect (not just boot) has been seen — used by CONFIG mode.
 bool gDisconnectSeen       = false;
 // Reconnect scheduling is active when true.
 bool gRetryArmed           = false;
@@ -331,10 +349,14 @@ class ClientCallbacks : public NimBLEClientCallbacks {
     gLastSignature = "";     // reset last sig so UI doesn't show stale data
     // Reset all reconnect state: connection succeeded.
     gRetryArmed       = false;
-    gRunBackoffIndex  = 0;
+    gRunAttemptCount  = 0;
+    gRunExhausted     = false;
     gBootAttemptCount = 0;
     gDisconnectSeen   = false;
     addKeyLog("Connected");
+    if (gRunMode) {
+      addKeyLog("[RECON] mode=RUN connected (resetting retry state)");
+    }
   }
 
   // Called when the link is dropped for any reason (keyboard powered off,
@@ -349,11 +371,12 @@ class ClientCallbacks : public NimBLEClientCallbacks {
     // Arm reconnect scheduler.
     gDisconnectSeen = true;
     if (gRunMode) {
-      // RUN: start backoff from step 0.
-      gRunBackoffIndex = 0;
-      gNextRetryMs     = millis() + RUN_BACKOFF_MS[0];
+      // RUN: restart bounded schedule; attempt 1 fires on next loop iteration.
+      gRunAttemptCount = 0;
+      gRunExhausted    = false;
+      gRunTrigger      = "disconnect";
+      gNextRetryMs     = 0; // attempt 1 fires immediately
       gRetryArmed      = true;
-      addKeyLog(String("[RECON] mode=RUN trigger=disconnect retry_index=0 (after ") + String(RUN_BACKOFF_MS[0]) + "ms)");
     } else {
       // CONFIG: do not auto-retry after a disconnect.
       gRetryArmed = false;
@@ -1209,18 +1232,21 @@ void setAutoConnectEnabled(bool enabled) {
 void setReconnectMode(bool runMode) {
   if (runMode == gRunMode) return; // no change
   if (runMode) {
-    // Switching CONFIG → RUN: start backoff from step 0 if not connected.
+    // Switching CONFIG → RUN: start bounded schedule immediately if not connected.
     gRunMode = true;
     if (!gConnected) {
-      gRunBackoffIndex = 0;
-      gNextRetryMs     = millis() + RUN_BACKOFF_MS[0];
+      gRunAttemptCount = 0;
+      gRunExhausted    = false;
+      gRunTrigger      = "boot";
+      gNextRetryMs     = 0; // attempt 1 fires immediately
       gRetryArmed      = true;
-      addKeyLog("[RECON] mode switch CONFIG→RUN, starting backoff");
+      addKeyLog("[RECON] mode switch CONFIG→RUN, starting schedule");
     }
   } else {
     // Switching RUN → CONFIG: cancel any pending retry.
-    gRunMode    = false;
-    gRetryArmed = false;
+    gRunMode      = false;
+    gRetryArmed   = false;
+    gRunExhausted = false;
     addKeyLog("[RECON] mode switch RUN→CONFIG, cancelling pending retry");
   }
 }
@@ -1230,10 +1256,11 @@ void setReconnectMode(bool runMode) {
 // attempt regardless of mode or pending backoff state.
 // ---------------------------------------------------------------------------
 void resetReconnectState() {
-  gRetryArmed      = false;
-  gRunBackoffIndex = 0;
+  gRetryArmed       = false;
+  gRunAttemptCount  = 0;
+  gRunExhausted     = false;
   gBootAttemptCount = 0;
-  gNextRetryMs     = 0;
+  gNextRetryMs      = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1356,44 +1383,85 @@ void maybeAutoConnectBondedKeyboard() {
   }
 
   // ---- RUN mode ----------------------------------------------------------
+  // Guard: exhausted — no further auto-retry until user presses D10.
+  if (gRunExhausted) {
+    return;
+  }
   if (!gRetryArmed) {
-    // Not yet armed: arm for step 0 (happens if module starts in RUN mode
-    // and was never disconnected yet, i.e. very first boot attempt).
-    gRunBackoffIndex = 0;
-    gNextRetryMs     = now + RUN_BACKOFF_MS[0];
+    // Not yet armed.  This can happen if the module starts in RUN mode and
+    // setReconnectMode hasn't fired yet.  Arm immediately so we don't skip.
+    gRunAttemptCount = 0;
+    gRunExhausted    = false;
+    gRunTrigger      = "boot";
+    gNextRetryMs     = 0;
     gRetryArmed      = true;
     return;
   }
   if (now < gNextRetryMs) {
-    return; // not time yet
+    return; // WAITING — countdown still in progress
   }
-  int step = gRunBackoffIndex < RUN_BACKOFF_COUNT ? gRunBackoffIndex : RUN_BACKOFF_COUNT - 1;
-  addKeyLog(String("[RECON] mode=RUN trigger=disconnect retry_index=") + String(step) +
-            " (after " + String(RUN_BACKOFF_MS[step]) + "ms)");
+
+  // Fire the next attempt.
+  gRunAttemptCount++;
+  if (gRunAttemptCount == 1) {
+    addKeyLog(String("[RECON] mode=RUN trigger=") + gRunTrigger +
+              " attempt=1/" + String(RUN_RETRY_COUNT));
+  } else {
+    uint32_t waitUsed = RUN_RETRY_SCHEDULE_MS[gRunAttemptCount - 2];
+    addKeyLog(String("[RECON] mode=RUN attempt=") + String(gRunAttemptCount) +
+              "/" + String(RUN_RETRY_COUNT) +
+              " (after " + String(waitUsed) + "ms wait)");
+  }
+
   bool ok = doConnect();
   if (!ok) {
-    // Advance to next backoff step (clamp at last).
-    if (gRunBackoffIndex < RUN_BACKOFF_COUNT - 1) {
-      gRunBackoffIndex++;
+    if (gRunAttemptCount >= RUN_RETRY_COUNT) {
+      // Schedule exhausted — give up until the user triggers again.
+      gRunExhausted = true;
+      gRetryArmed   = false;
+      addKeyLog(String("[RECON] mode=RUN exhausted (gave up after ") +
+                String(RUN_RETRY_COUNT) + " attempts, waiting for user)");
+    } else {
+      // Schedule next attempt after the prescribed wait.
+      gNextRetryMs = millis() + RUN_RETRY_SCHEDULE_MS[gRunAttemptCount - 1];
+      gRetryArmed  = true;
     }
-    int next = gRunBackoffIndex < RUN_BACKOFF_COUNT ? gRunBackoffIndex : RUN_BACKOFF_COUNT - 1;
-    gNextRetryMs = millis() + RUN_BACKOFF_MS[next];
-    gRetryArmed  = true;
   }
-  // On success, onConnect() resets gRetryArmed and counters.
+  // On success, onConnect() resets gRetryArmed, gRunAttemptCount, and gRunExhausted.
 }
 
 // ---------------------------------------------------------------------------
 // tryConnectNow — user-initiated immediate connect attempt (RUN mode button)
 // ---------------------------------------------------------------------------
-// Calls doConnect() immediately, bypassing the backoff schedule.
-// On success: onConnect() resets backoff state normally.
-// On failure: backoff state is untouched — the existing retry schedule resumes.
+// Restarts the bounded RUN schedule from attempt 1 with trigger="user",
+// regardless of whether the previous schedule was mid-run or exhausted.
+// Fires attempt 1 immediately (same call, not deferred to the next loop tick).
+// On success: onConnect() resets all retry state.
+// On failure: the remainder of the schedule is armed so subsequent calls to
+// maybeAutoConnectBondedKeyboard() continue from attempt 2 onward.
 bool tryConnectNow() {
   if (gPreferredBondedAddress.length() == 0) return false;
-  addKeyLog("[BTN] manual connect attempt");
+  // Restart schedule from the top.
+  gRunAttemptCount = 0;
+  gRunExhausted    = false;
+  gRunTrigger      = "user";
+  gNextRetryMs     = 0;
+  gRetryArmed      = true;
+  // Fire attempt 1 immediately.
+  gRunAttemptCount++;
+  addKeyLog(String("[RECON] mode=RUN trigger=user attempt=1/") + String(RUN_RETRY_COUNT));
   bool ok = doConnect();
-  if (!ok) addKeyLog("[BTN] manual connect failed, resuming backoff schedule");
+  if (!ok) {
+    if (gRunAttemptCount >= RUN_RETRY_COUNT) {
+      gRunExhausted = true;
+      gRetryArmed   = false;
+      addKeyLog(String("[RECON] mode=RUN exhausted (gave up after ") +
+                String(RUN_RETRY_COUNT) + " attempts, waiting for user)");
+    } else {
+      gNextRetryMs = millis() + RUN_RETRY_SCHEDULE_MS[gRunAttemptCount - 1];
+      gRetryArmed  = true;
+    }
+  }
   return ok;
 }
 
