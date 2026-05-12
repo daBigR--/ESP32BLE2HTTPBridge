@@ -212,6 +212,7 @@ const char PAGE[] PROGMEM = R"HTML(
     }
     button.alt  { background: #6b7f75; }
     button.warn { background: var(--warn); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
     .btn-flash-saved { background: var(--ok) !important; color: #fff !important; }
     .btn-flash-busy  { background: #fff8e6 !important; color: #c07a00 !important; }
     .btn-flash-error { background: var(--warn) !important; color: #fff !important; }
@@ -1646,7 +1647,9 @@ const char PAGE[] PROGMEM = R"HTML(
           stEl.style.color = 'var(--ok)';
           stEl.textContent = 'Connected to ' + data.ssid + ', IP ' + data.ip;
           // Auto-disconnect after 4 s so we don't leave APSTA mode running.
+          // Skip if test mode was entered in the meantime — it owns the STA.
           setTimeout(async function() {
+            if (testModeActive) { return; }
             try { await fetch('/diag/sta/disconnect'); } catch (_) {}
             stEl.style.color = 'var(--muted)';
             stEl.textContent = 'Not connected';
@@ -1804,6 +1807,7 @@ const char PAGE[] PROGMEM = R"HTML(
       var btn = document.getElementById('testBtn');
       btn.textContent = 'Entering\u2026';
       btn.disabled = true;
+      setDiagButtonsDisabled(true);
       // Show panel immediately in amber/expanded state while connecting.
       testFiresLog = [];
       var p = document.getElementById('testPanel');
@@ -1823,6 +1827,7 @@ const char PAGE[] PROGMEM = R"HTML(
           alert('Cannot enter Test Mode: ' + (data.error || 'unknown error'));
           btn.textContent = 'Test';
           btn.disabled = false;
+          setDiagButtonsDisabled(false);
           return;
         }
         testModeActive    = true;
@@ -1836,7 +1841,6 @@ const char PAGE[] PROGMEM = R"HTML(
         btn.textContent = 'Exit Test';
         btn.classList.add('test-active');
         btn.disabled = false;
-        setDiagButtonsDisabled(true);
         console.log('[test] entered');
       } catch (e) {
         p.classList.remove('tp-visible', 'tp-expanded');
@@ -1845,6 +1849,7 @@ const char PAGE[] PROGMEM = R"HTML(
         alert('Test Mode entry failed: ' + e.message);
         btn.textContent = 'Test';
         btn.disabled = false;
+        setDiagButtonsDisabled(false);
       }
     }
 

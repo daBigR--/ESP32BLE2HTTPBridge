@@ -395,21 +395,25 @@ void registerRoutes(WebServer& server, const Context& ctx) {
       return;
     }
 
-    // Enter APSTA and connect to saved network.
-    auto conn = Apsta::enterApsta(*ctx.wifiNetworks);
-    if (!conn.success) {
-      String errEsc = JsonUtil::escape(conn.error);
-      server.send(200, "application/json",
-        String("{\"ok\":false,\"error\":\"STA connect: ") + errEsc + String("\"}"));
-      // enterApsta already restored AP-only on failure — no exitApsta needed.
-      return;
+    // If the test panel is already holding an APSTA connection, reuse it.
+    // Otherwise enter APSTA, fetch, then exit — the normal transient flow.
+    bool borrowedSta = sTestModeActive && (WiFi.status() == WL_CONNECTED);
+    if (!borrowedSta) {
+      auto conn = Apsta::enterApsta(*ctx.wifiNetworks);
+      if (!conn.success) {
+        String errEsc = JsonUtil::escape(conn.error);
+        server.send(200, "application/json",
+          String("{\"ok\":false,\"error\":\"STA connect: ") + errEsc + String("\"}"));
+        // enterApsta already restored AP-only on failure — no exitApsta needed.
+        return;
+      }
     }
 
     // Perform the GET.
     NetFetch::HttpResponse resp = NetFetch::httpGet(url);
 
-    // Always exit APSTA after the fetch completes (or fails).
-    Apsta::exitApsta();
+    // Only tear down APSTA if we were the ones who brought it up.
+    if (!borrowedSta) { Apsta::exitApsta(); }
 
     // Truncate body to 2 KB for the JSON response (UI only shows ~500 chars).
     // The full body up to 200 KB was already read by httpGet; we just cap here
