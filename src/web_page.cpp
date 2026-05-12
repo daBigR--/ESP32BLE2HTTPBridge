@@ -59,12 +59,19 @@ const char PAGE[] PROGMEM = R"HTML(
       gap: 12px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.18);
     }
+    #bondedGroup {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+    }
     #bondedStatus {
       display: flex;
       align-items: center;
       gap: 8px;
       cursor: pointer;
-      flex: 1;
       min-width: 0;
       overflow: hidden;
     }
@@ -377,19 +384,129 @@ const char PAGE[] PROGMEM = R"HTML(
       align-items: center;
       gap: 10px;
     }
+
+    /* -- Test button in header -------------------------------------------- */
+    #testBtn {
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.40);
+      color: #fff;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s;
+    }
+    #testBtn.test-active {
+      background: #fff8e6;
+      border-color: #e0c060;
+      color: #c07a00;
+    }
+    .hdr-divider {
+      width: 1px;
+      height: 26px;
+      background: rgba(255,255,255,0.28);
+      flex-shrink: 0;
+    }
+
+    /* -- Test Mode bottom panel ------------------------------------------- */
+    #testPanel {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 150;
+      background: #1a2e25;
+      color: #d4ede1;
+      border-top: 2px solid #3a6b55;
+      transform: translateY(100%);
+      transition: transform 0.22s cubic-bezier(0.4,0,0.2,1);
+      box-shadow: 0 -4px 24px rgba(0,0,0,0.30);
+      font-family: inherit;
+    }
+    #testPanel.tp-visible  { transform: translateY(0); }
+    #testPanel.tp-compact  { height: 40px; overflow: hidden; }
+    #testPanel.tp-expanded { height: 35vh; display: flex; flex-direction: column; }
+
+    #testCompactBar {
+      height: 40px;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      gap: 10px;
+      font-size: 0.84rem;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    .tp-expanded #testCompactBar { display: none; }
+    .tp-compact  #testExpandedView { display: none; }
+
+    #testExpandedView {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      overflow: hidden;
+    }
+    #testExpandedHdr {
+      display: block;
+      padding: 8px 12px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.15);
+      flex-shrink: 0;
+      font-size: 0.82rem;
+    }
+    #testFiresLog {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 10px;
+      font-family: Consolas, monospace;
+      font-size: 0.80rem;
+      line-height: 1.5;
+    }
+    .tp-fire-entry { padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.07); word-break: break-all; }
+    .tp-fire-ok    { color: #6fe8a0; }
+    .tp-fire-err   { color: #f08080; }
+    .tp-fire-unmap { color: #a0a0a0; }
+    #testCompactLast {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #a0c8b0;
+      font-size: 0.80rem;
+    }
+    .dot-test-green { background: #5fe89a; box-shadow: 0 0 6px #5fe89a; }
+    .dot-test-amber { background: #f0b840; }
+    .dot-test-red   { background: #f07070; }
+    .tp-btn {
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.25);
+      color: #d4ede1;
+      border-radius: 6px;
+      padding: 3px 9px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.82rem;
+      flex-shrink: 0;
+    }
+    .tp-btn:hover { background: rgba(255,255,255,0.22); }
   </style>
 </head>
 <body>
 
   <!-- Ã¢â€â‚¬Ã¢â€â‚¬ Sticky header Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ -->
   <div id="appHeader">
-    <div id="bondedStatus" onclick="switchTab('ble')" title="Go to BLE tab">
-      <span id="statusDot" class="dot dot-none"></span>
-      <span id="bondedName">No device bonded</span>
+    <div id="bondedGroup">
+      <div id="bondedStatus" onclick="switchTab('ble')" title="Go to BLE tab">
+        <span id="statusDot" class="dot dot-none"></span>
+        <span id="bondedName">No device bonded</span>
+      </div>
+      <button id="connectBtn" onclick="connectBonded()" style="display:none">Connect</button>
     </div>
     <div id="headerActions">
-      <button id="connectBtn" onclick="connectBonded()" style="display:none">Connect</button>
-      <button id="applyRunBtn" onclick="openApplyModal()">Apply &amp; Run</button>
+      <button id="testBtn" onclick="toggleTestMode()">Test</button>
+      <div class="hdr-divider"></div>
+      <button id="applyRunBtn" onclick="openApplyModal()">Exit &amp; Run</button>
     </div>
   </div>
 
@@ -560,12 +677,12 @@ const char PAGE[] PROGMEM = R"HTML(
   <!-- Ã¢â€â‚¬Ã¢â€â‚¬ Apply & Run confirmation modal Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ -->
   <div id="applyModal" class="modal-bg" onclick="modalBackdropClick(event,'applyModal')">
     <div class="modal">
-      <h3>Apply &amp; Run</h3>
+      <h3>Exit &amp; Run</h3>
       <p>This will exit configuration mode and reboot into run mode. The web UI will become unreachable. To return to configuration, hold the boot button (D10) for &ge;&nbsp;0.8&nbsp;s at power-on.</p>
       <div class="modal-error" id="applyModalError"></div>
       <div class="actions">
         <button class="alt" onclick="closeModal('applyModal')">Cancel</button>
-        <button onclick="confirmApplyRun()">Apply &amp; Run</button>
+        <button onclick="confirmApplyRun()">Exit &amp; Run</button>
       </div>
     </div>
   </div>
@@ -589,6 +706,33 @@ const char PAGE[] PROGMEM = R"HTML(
         <button class="alt" onclick="closeModal('resetModal')">Cancel</button>
         <button class="warn" onclick="confirmReset()">Erase Everything</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Test Mode panel (fixed bottom, slides up when active) -->
+  <div id="testPanel" class="tp-compact">
+    <!-- Compact view: single status bar -->
+    <div id="testCompactBar">
+      <span id="testDotC" class="dot dot-none"></span>
+      <span style="font-weight:700">Test Mode</span>
+      <span id="testStaStatusC" style="color:#a0c8b0;font-size:0.80rem;flex-shrink:0"></span>
+      <span id="testCompactLast"></span>
+      <button class="tp-btn" onclick="setTestExpanded(true)" title="Expand">&#x2191;</button>
+      <button class="tp-btn" onclick="exitTestMode()" title="Exit Test Mode">&#x2715;</button>
+    </div>
+    <!-- Expanded view: header bar + fires log -->
+    <div id="testExpandedView">
+      <div id="testExpandedHdr">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+          <span style="font-weight:700;font-size:0.9rem;flex:1">Test Mode</span>
+          <button class="tp-btn" onclick="setTestExpanded(false)" title="Collapse">&#x2193;</button>
+          <button class="tp-btn" onclick="exitTestMode()" title="Exit Test Mode">&#x2715;</button>
+        </div>
+        <div style="color:#a0c8b0">Status: <span id="testStaStatusE"></span></div>
+        <div style="color:#a0c8b0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Target: <span id="testTargetUrlE" style="font-family:Consolas,monospace;font-size:0.78rem"></span></div>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.15);margin:6px 0 0 0">
+      </div>
+      <div id="testFiresLog"></div>
     </div>
   </div>
 
@@ -1006,6 +1150,7 @@ const char PAGE[] PROGMEM = R"HTML(
 
     function renderBaseUrls(urls, selectedIdx) {
       baseUrlsList = urls;
+      selectedUrlIndex = selectedIdx || 0;
       var el = document.getElementById('baseUrlsList');
       if (!urls.length) {
         el.innerHTML = '<div class="empty-state">No URLs configured \u2014 enter a URL above to add one.</div>';
@@ -1101,6 +1246,7 @@ const char PAGE[] PROGMEM = R"HTML(
     var mappingEditOriginalKey = '';
 
     function renderMappings(mappings) {
+      currentMappings = mappings;
       var el = document.getElementById('mappingsList');
       if (!mappings.length) {
         el.innerHTML = '<div class="empty-state">No mappings yet \u2014 connect a BLE device, press a button, then assign a URL to the captured signature.</div>';
@@ -1225,7 +1371,18 @@ const char PAGE[] PROGMEM = R"HTML(
     var reverseFlowPendingEvent = null;
     var currentBleConnected = false;
 
+    // -- Test Mode state ---------------------------------------------------
+    var testModeActive    = false;
+    var testPanelExpanded = true;   // resets to expanded on each entry
+    var selectedUrlIndex  = 0;      // kept in sync by renderBaseUrls
+    var currentMappings   = [];     // kept in sync by renderMappings
+    var testFiresLog      = [];     // last 20 fires, newest first
+
     function openEventPicker(mode) {
+      if (testModeActive) {
+        alert('Exit Test Mode before scanning events.');
+        return;
+      }
       if (mode === 'reverse' && !currentBleConnected) {
         showInlineError('mappingError', 'Connect a BLE device first.');
         return;
@@ -1250,6 +1407,10 @@ const char PAGE[] PROGMEM = R"HTML(
     }
 
     async function fetchPickerEvents() {
+      if (testModeActive) {
+        alert('Exit Test Mode before refreshing events.');
+        return;
+      }
       var refreshBtn = document.getElementById('pickerRefreshBtn');
       var list = document.getElementById('eventPickerList');
       if (koreaderEvents) {
@@ -1615,6 +1776,7 @@ const char PAGE[] PROGMEM = R"HTML(
 
       if (s.lastSig && s.burstSeq !== lastSeenBurstSeq) {
         checkCapture(s.lastSig);
+        if (testModeActive) { testFireSig(s.lastSig); } // fire-and-forget
         lastSeenKey = s.lastSig;
         lastSeenBurstSeq = s.burstSeq;
       }
@@ -1629,6 +1791,191 @@ const char PAGE[] PROGMEM = R"HTML(
         rb.scrollTop = rb.scrollHeight;
       }
     }
+
+    // =========================================================================
+    // Test Mode
+    // =========================================================================
+
+    async function toggleTestMode() {
+      if (testModeActive) { exitTestMode(); } else { enterTestMode(); }
+    }
+
+    async function enterTestMode() {
+      var btn = document.getElementById('testBtn');
+      btn.textContent = 'Entering\u2026';
+      btn.disabled = true;
+      // Show panel immediately in amber/expanded state while connecting.
+      testFiresLog = [];
+      var p = document.getElementById('testPanel');
+      p.classList.remove('tp-compact');
+      p.classList.add('tp-expanded', 'tp-visible');
+      document.body.style.paddingBottom = '35vh';
+      setTestStaDot('amber', 'Connecting\u2026', 'Connecting\u2026');
+      renderTestFiresLog();
+      try {
+        var r    = await fetch('/test/enter');
+        var data = await r.json();
+        if (!data.ok) {
+          // Roll back: hide panel.
+          p.classList.remove('tp-visible', 'tp-expanded');
+          p.classList.add('tp-compact');
+          document.body.style.paddingBottom = '';
+          alert('Cannot enter Test Mode: ' + (data.error || 'unknown error'));
+          btn.textContent = 'Test';
+          btn.disabled = false;
+          return;
+        }
+        testModeActive    = true;
+        testPanelExpanded = true;
+        var staMsg = 'Connected to ' + data.ssid + '  (' + data.ip + ')';
+        setTestStaDot('green', staMsg, staMsg);
+        var targetUrl = (baseUrlsList.length > 0)
+          ? (baseUrlsList[selectedUrlIndex] || baseUrlsList[0]) : '(no base URL)';
+        document.getElementById('testTargetUrlE').textContent = targetUrl;
+        renderTestFiresLog();
+        btn.textContent = 'Exit Test';
+        btn.classList.add('test-active');
+        btn.disabled = false;
+        setDiagButtonsDisabled(true);
+        console.log('[test] entered');
+      } catch (e) {
+        p.classList.remove('tp-visible', 'tp-expanded');
+        p.classList.add('tp-compact');
+        document.body.style.paddingBottom = '';
+        alert('Test Mode entry failed: ' + e.message);
+        btn.textContent = 'Test';
+        btn.disabled = false;
+      }
+    }
+
+    async function exitTestMode() {
+      testModeActive = false;
+      var p = document.getElementById('testPanel');
+      p.classList.remove('tp-visible', 'tp-expanded');
+      p.classList.add('tp-compact');
+      document.body.style.paddingBottom = '';
+      var btn = document.getElementById('testBtn');
+      btn.textContent = 'Test';
+      btn.classList.remove('test-active');
+      btn.disabled = false;
+      testFiresLog = [];
+      setDiagButtonsDisabled(false);
+      console.log('[test] exited');
+      try { await fetch('/test/exit'); } catch (_) {}
+    }
+
+    function setTestExpanded(expanded) {
+      testPanelExpanded = expanded;
+      var p = document.getElementById('testPanel');
+      p.classList.toggle('tp-compact',  !expanded);
+      p.classList.toggle('tp-expanded',  expanded);
+      document.body.style.paddingBottom = expanded ? '35vh' : '40px';
+    }
+
+    function setTestStaDot(color, statusC, statusE) {
+      var dotC = document.getElementById('testDotC');
+      dotC.className = 'dot dot-test-' + color;
+      document.getElementById('testStaStatusC').textContent = statusC || '';
+      document.getElementById('testStaStatusE').textContent = statusE || '';
+    }
+
+    async function testFireSig(sig) {
+      // Look up in current mappings.
+      var mapping = null;
+      for (var i = 0; i < currentMappings.length; i++) {
+        if (currentMappings[i].sig === sig) { mapping = currentMappings[i]; break; }
+      }
+      if (!mapping) {
+        addTestFire({ type: 'unmap', sig: sig });
+        console.log('[test] unmapped signature=' + sig);
+        return;
+      }
+      var suffix = mapping.url;
+      try {
+        var r    = await fetch('/test/fire?sig=' + encodeURIComponent(sig)
+                              + '&suffix=' + encodeURIComponent(suffix));
+        var data = await r.json();
+        if (data.ok) {
+          addTestFire({ type: 'ok', sig: sig, url: data.url, status: data.status,
+                        elapsed: data.elapsed_ms, body: data.body_excerpt });
+          console.log('[test] fire signature=' + sig + ' -> ' + data.url
+                      + ' status=' + data.status + ' elapsed=' + data.elapsed_ms + 'ms');
+        } else {
+          addTestFire({ type: 'err', sig: sig, url: data.url || suffix, error: data.error });
+          console.log('[test] fire failed signature=' + sig
+                      + ' -> ' + (data.url || suffix) + ' reason=' + (data.error || ''));
+        }
+      } catch (e) {
+        addTestFire({ type: 'err', sig: sig, url: suffix, error: e.message });
+        console.log('[test] fire failed signature=' + sig + ' reason=' + e.message);
+      }
+    }
+
+    function addTestFire(entry) {
+      var now = new Date();
+      entry.ts = now.getHours().toString().padStart(2,'0') + ':'
+               + now.getMinutes().toString().padStart(2,'0') + ':'
+               + now.getSeconds().toString().padStart(2,'0');
+      testFiresLog.unshift(entry);
+      if (testFiresLog.length > 20) testFiresLog.length = 20;
+      renderTestFiresLog();
+      updateTestCompactLast(entry);
+    }
+
+    function renderTestFiresLog() {
+      var el = document.getElementById('testFiresLog');
+      if (!el) return;
+      if (!testFiresLog.length) {
+        el.innerHTML = '<div style="padding:10px;color:#6a8f7a;font-size:0.82rem">'
+                     + 'Press a button on your BLE device to see results here.</div>';
+        return;
+      }
+      el.innerHTML = testFiresLog.map(function(e) {
+        var ts = '<span style="color:#6a8f7a">' + htmlEsc(e.ts) + '</span>';
+        if (e.type === 'unmap') {
+          return '<div class="tp-fire-entry tp-fire-unmap">' + ts
+               + ' &nbsp; <em>unmapped</em> &nbsp; ' + htmlEsc(e.sig) + '</div>';
+        }
+        if (e.type === 'ok') {
+          var urlSuffix = e.url ? e.url.replace(/^https?:\/\/[^/]+/, '') : e.sig;
+          var bodyPart  = e.body
+            ? ' &nbsp;<span style="color:#8fc8a8">' + htmlEsc(e.body) + '</span>'
+            : '';
+          return '<div class="tp-fire-entry tp-fire-ok">' + ts
+               + ' &nbsp; ' + htmlEsc(urlSuffix)
+               + ' &rarr; ' + e.status + ' OK &nbsp; ' + e.elapsed + 'ms'
+               + bodyPart + '</div>';
+        }
+        return '<div class="tp-fire-entry tp-fire-err">' + ts
+             + ' &nbsp; ' + htmlEsc(e.url || e.sig)
+             + ' &rarr; ERROR: ' + htmlEsc(e.error || '') + '</div>';
+      }).join('');
+    }
+
+    function updateTestCompactLast(entry) {
+      var el = document.getElementById('testCompactLast');
+      if (!el) return;
+      if (entry.type === 'unmap') {
+        el.textContent = 'Unmapped: ' + entry.sig;
+      } else if (entry.type === 'ok') {
+        var urlSuffix = entry.url ? entry.url.replace(/^https?:\/\/[^/]+/, '') : entry.sig;
+        el.textContent = 'Last: ' + urlSuffix + ' \u2192 ' + entry.status + ' OK ' + entry.elapsed + 'ms';
+      } else {
+        el.textContent = 'Error: ' + (entry.error || entry.sig);
+      }
+    }
+
+    function setDiagButtonsDisabled(disabled) {
+      var ids = ['diagConnectBtn'];
+      ids.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.disabled = disabled;
+      });
+    }
+
+    window.addEventListener('beforeunload', function() {
+      if (testModeActive) { navigator.sendBeacon('/test/exit'); }
+    });
 
     setInterval(refreshState, 500);
     refreshState();

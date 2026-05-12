@@ -80,7 +80,7 @@
       Make this extra long distinct from current long by starting blinking led D1 rapidly after
       current long press threshold and until extra long threshold reached then turns on continuosly.
 
-- [ ] **Add test mode in config**: allow the user to press buttons and send them to the configured
+- [x] **Add test mode in config**: allow the user to press buttons and send them to the configured
       url + action mappings without exiting config mode.  Requires complete configuration:
 	ssid/pwd, paired device, base URL and at least one action map.  Then switching mode
 	to AP + STA.  Also a special section to show status of test and exit from test option.

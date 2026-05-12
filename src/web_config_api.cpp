@@ -31,11 +31,15 @@
 #include <algorithm>
 
 #include "apsta.h"
+#include "ble_keyboard.h"
 #include "json_util.h"
 #include "key_log.h"
 #include "net_fetch.h"
 
 namespace WebConfigApi {
+
+// true while the browser-side Test Mode panel is active and APSTA is held up.
+static bool sTestModeActive = false;
 
 void registerRoutes(WebServer& server, const Context& ctx) {
 
@@ -492,6 +496,103 @@ void registerRoutes(WebServer& server, const Context& ctx) {
     server.send(200, "application/json", "{\"ok\":true}");
     delay(300);
     ESP.restart();
+  });
+
+  // ---- GET /test/enter ----------------------------------------------------
+  // Validates that the config is complete enough for run mode (same 4
+  // conditions as ConfigStore::hasValidRunConfig), then enters APSTA and
+  // connects the STA to the best saved WiFi network.  While in test mode the
+  // STA stays connected so /test/fire can reach the target HTTP server.
+  // Response: {"ok":true,"ssid":"<name>","ip":"<addr>"}
+  //           {"ok":false,"error":"<reason>"}
+  server.on("/test/enter", HTTP_GET, [ctx, &server]() {
+    // Refuse if the config isn't ready for run mode.
+    if (!ConfigStore::hasValidRunConfig(
+          *ctx.wifiNetworks,
+          *ctx.baseUrls,
+          *ctx.buttonMappings,
+          BLEKeyboard::preferredBondedAddress())) {
+      server.send(200, "application/json",
+        "{\"ok\":false,\"error\":\"Config incomplete: need WiFi, base URL, "
+        "at least one mapping, and a bonded keyboard.\"}");
+      return;
+    }
+    auto res = Apsta::enterApsta(*ctx.wifiNetworks);
+    if (!res.success) {
+      String errEsc = JsonUtil::escape(res.error);
+      server.send(200, "application/json",
+        String("{\"ok\":false,\"error\":\"") + errEsc + String("\"}"));
+      return;
+    }
+    sTestModeActive = true;
+    KeyLog::add("[TEST] enter");
+    String ssidEsc = JsonUtil::escape(res.ssid);
+    server.send(200, "application/json",
+      String("{\"ok\":true,\"ssid\":\"") + ssidEsc
+      + String("\",\"ip\":\"") + res.ip + String("\"}"));
+  });
+
+  // ---- GET|POST /test/exit ------------------------------------------------
+  // Disconnects the STA and exits test mode.  Registered as HTTP_ANY so the
+  // browser can call it via navigator.sendBeacon() (POST) on beforeunload as
+  // well as via a normal fetch (GET) when the user clicks Exit.
+  server.on("/test/exit", HTTP_ANY, [&server]() {
+    Apsta::exitApsta();
+    sTestModeActive = false;
+    KeyLog::add("[TEST] exit");
+    server.send(200, "application/json", "{\"ok\":true}");
+  });
+
+  // ---- GET /test/fire?sig=<hex>&suffix=<path> -----------------------------
+  // Fires one mapped URL while test mode is active.  The ESP32 performs the
+  // HTTP GET over the already-connected STA and returns the result so the
+  // browser can display it in the fires log.
+  // Response: {"ok":<bool>,"status":<int>,"elapsed_ms":<int>,
+  //            "body_excerpt":"<esc80>","url":"<full>","sig":"<hex>","error":"<esc>"}
+  server.on("/test/fire", HTTP_GET, [ctx, &server]() {
+    if (!server.hasArg("sig") || !server.hasArg("suffix")) {
+      server.send(400, "application/json",
+        "{\"ok\":false,\"error\":\"missing sig or suffix\"}");
+      return;
+    }
+    if (!sTestModeActive) {
+      server.send(200, "application/json",
+        "{\"ok\":false,\"error\":\"not in test mode\"}");
+      return;
+    }
+    String sig    = server.arg("sig");
+    String suffix = server.arg("suffix");
+    size_t idx    = *ctx.selectedUrlIndex;
+    if (idx >= ctx.baseUrls->size()) idx = 0;
+    if (ctx.baseUrls->empty()) {
+      server.send(200, "application/json",
+        "{\"ok\":false,\"error\":\"no base URL configured\"}");
+      return;
+    }
+    String fullUrl = (*ctx.baseUrls)[idx] + suffix;
+    uint32_t t0 = millis();
+    NetFetch::HttpResponse resp = NetFetch::httpGet(fullUrl);
+    uint32_t elapsed = millis() - t0;
+    if (resp.success) {
+      KeyLog::add(String("[TEST] fire signature=") + sig
+                  + String(" url=") + fullUrl
+                  + String(" status=") + String(resp.status)
+                  + String(" elapsed=") + String(elapsed) + String("ms"));
+    } else {
+      KeyLog::add(String("[TEST] fire failed signature=") + sig
+                  + String(" url=") + fullUrl
+                  + String(" reason=") + resp.error);
+    }
+    // Truncate body to 80 chars for the browser log entry.
+    String bodyExcerpt = resp.body.substring(0, 80);
+    server.send(200, "application/json",
+      String("{\"ok\":") + (resp.success ? "true" : "false")
+      + String(",\"status\":") + String(resp.status)
+      + String(",\"elapsed_ms\":") + String(elapsed)
+      + String(",\"body_excerpt\":\"") + JsonUtil::escape(bodyExcerpt) + String("\"")
+      + String(",\"url\":\"")          + JsonUtil::escape(fullUrl)     + String("\"")
+      + String(",\"sig\":\"")          + JsonUtil::escape(sig)         + String("\"")
+      + String(",\"error\":\"")        + JsonUtil::escape(resp.error)  + String("\"}"));
   });
 }
 
