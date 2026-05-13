@@ -1,16 +1,16 @@
-#include "web_page.h"
+﻿#include "web_page.h"
 
 // =============================================================================
-// web_page.cpp Ã¢â‚¬â€ Single-page config UI served in CONFIG mode
+// web_page.cpp -- Single-page config UI served in CONFIG mode
 // =============================================================================
 //
 // Layout: persistent sticky header + 4 tabs (General / BLE / Actions / System)
-//   Header  Ã¢â‚¬â€ bonded keyboard status dot + name, conditional Connect button,
-//             Apply & Run primary action (opens confirmation modal Ã¢â€ â€™ /reboot)
-//   General Ã¢â‚¬â€ WiFi networks, Power & Sleep timeout
-//   BLE     Ã¢â‚¬â€ Keyboard scan, discovered devices, bonded device detail
-//   Actions Ã¢â‚¬â€ Base URLs, button capture + assignment, current mappings
-//   System  Ã¢â‚¬â€ Reboot, Factory Reset, Recent Bursts feed, Pressed Keys log
+//   Header  -- bonded keyboard status dot + name, conditional Connect button,
+//             Apply & Run primary action (opens confirmation modal -- /reboot)
+//   General -- WiFi networks, Power & Sleep timeout
+//   BLE     -- Keyboard scan, discovered devices, bonded device detail
+//   Actions -- Base URLs, button capture + assignment, current mappings
+//   System  -- Reboot, Factory Reset, Recent Bursts feed, Pressed Keys log
 //
 // All existing HTTP endpoints are unchanged.  This is a pure frontend file.
 // =============================================================================
@@ -44,7 +44,7 @@ const char PAGE[] PROGMEM = R"HTML(
       min-height: 100vh;
     }
 
-    /* Ã¢â€â‚¬Ã¢â€â‚¬ Header Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
+    /* -- Header -- */
     #appHeader {
       position: sticky;
       top: 0;
@@ -122,7 +122,7 @@ const char PAGE[] PROGMEM = R"HTML(
       font-family: inherit;
     }
 
-    /* Ã¢â€â‚¬Ã¢â€â‚¬ Tab bar Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
+    /* -- Tab bar -- */
     #tabBar {
       position: sticky;
       top: var(--header-h);
@@ -162,7 +162,7 @@ const char PAGE[] PROGMEM = R"HTML(
       padding-bottom: 11px;
     }
 
-    /* Ã¢â€â‚¬Ã¢â€â‚¬ Status bar Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
+    /* -- Status bar -- */
     #state {
       background: #eef4f1;
       color: var(--ink);
@@ -179,12 +179,12 @@ const char PAGE[] PROGMEM = R"HTML(
     #state.state-error{ background:#fdf0ef; border-left-color:var(--warn);  color:var(--warn); }
     #state.state-busy { background:#fff8e6; border-left-color:#c07a00; color:#c07a00; }
 
-    /* Ã¢â€â‚¬Ã¢â€â‚¬ Layout Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
+    /* -- Layout -- */
     .wrap { max-width: 980px; margin: 0 auto; }
     .tab-panel { display: none; padding: 16px; }
     .tab-panel.active { display: block; }
 
-    /* Ã¢â€â‚¬Ã¢â€â‚¬ Card Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
+    /* -- Card -- */
     .card {
       background: var(--card);
       border: 1px solid var(--line);
@@ -197,7 +197,7 @@ const char PAGE[] PROGMEM = R"HTML(
     .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-    /* Ã¢â€â‚¬Ã¢â€â‚¬ Buttons Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
+    /* -- Buttons -- */
     button {
       border: 0;
       border-radius: 10px;
@@ -217,7 +217,7 @@ const char PAGE[] PROGMEM = R"HTML(
     .btn-flash-busy  { background: #fff8e6 !important; color: #c07a00 !important; }
     .btn-flash-error { background: var(--warn) !important; color: #fff !important; }
 
-    /* Ã¢â€â‚¬Ã¢â€â‚¬ Lists Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
+    /* -- Lists -- */
     ul { list-style: none; margin: 0; padding: 0; }
     li {
       border: 1px solid var(--line);
@@ -235,7 +235,7 @@ const char PAGE[] PROGMEM = R"HTML(
       to   { opacity: 1; transform: translateY(0); }
     }
 
-    /* Ã¢â€â‚¬Ã¢â€â‚¬ Misc Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
+    /* -- Misc -- */
     .mono { font-family: Consolas, monospace; font-size: 0.9rem; }
     .ok   { color: var(--ok); font-weight: 700; }
     .pill {
@@ -283,7 +283,7 @@ const char PAGE[] PROGMEM = R"HTML(
       text-align: center;
     }
 
-    /* Ã¢â€â‚¬Ã¢â€â‚¬ Modal Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
+    /* -- Modal -- */
     .empty-state {
       padding: 18px 4px;
       color: #888;
@@ -334,7 +334,7 @@ const char PAGE[] PROGMEM = R"HTML(
     .modal p  { margin: 0 0 20px 0; font-size: 0.93rem; color: var(--muted); line-height: 1.5; }
     .modal .actions { justify-content: flex-end; }
 
-    /* Ã¢â€â‚¬Ã¢â€â‚¬ Responsive Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
+    /* -- Responsive -- */
     @media (max-width: 480px) {
       .log { height: 200px; }
       li { flex-direction: column; align-items: flex-start; }
@@ -495,7 +495,7 @@ const char PAGE[] PROGMEM = R"HTML(
 </head>
 <body>
 
-  <!-- Ã¢â€â‚¬Ã¢â€â‚¬ Sticky header Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ -->
+  <!-- -- Sticky header -- -->
   <div id="appHeader">
     <div id="bondedGroup">
       <div id="bondedStatus" onclick="switchTab('ble')" title="Go to BLE tab">
@@ -511,7 +511,7 @@ const char PAGE[] PROGMEM = R"HTML(
     </div>
   </div>
 
-  <!-- Ã¢â€â‚¬Ã¢â€â‚¬ Tab bar Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ -->
+  <!-- -- Tab bar -- -->
   <div id="tabBar">
     <button class="tab-btn" data-tab="general" onclick="switchTab('general')">WiFi</button>
     <button class="tab-btn" data-tab="ble"     onclick="switchTab('ble')">Bluetooth</button>
@@ -519,10 +519,10 @@ const char PAGE[] PROGMEM = R"HTML(
     <button class="tab-btn" data-tab="system"  onclick="switchTab('system')">System</button>
   </div>
 
-  <!-- Ã¢â€â‚¬Ã¢â€â‚¬ Tab panels Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ -->
+  <!-- -- Tab panels -- -->
   <div class="wrap">
 
-    <!-- GENERAL Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ -->
+    <!-- GENERAL -- -->
     <div id="tab-general" class="tab-panel">
       <div class="card">
         <h2>WiFi Networks</h2>
@@ -546,7 +546,7 @@ const char PAGE[] PROGMEM = R"HTML(
       </div>
     </div>
 
-    <!-- BLE Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ -->
+    <!-- BLE -- -->
     <div id="tab-ble" class="tab-panel">
       <div class="card">
         <h2>Keyboard Scan</h2>
@@ -567,7 +567,7 @@ const char PAGE[] PROGMEM = R"HTML(
       </div>
     </div>
 
-    <!-- ACTIONS Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ -->
+    <!-- ACTIONS -- -->
     <div id="tab-actions" class="tab-panel">
       <div class="card">
         <h2>Base URLs</h2>
@@ -618,7 +618,7 @@ const char PAGE[] PROGMEM = R"HTML(
       </div>
     </div>
 
-    <!-- SYSTEM Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ -->
+    <!-- SYSTEM -- -->
     <div id="tab-system" class="tab-panel">
       <div class="card">
         <h2>Power &amp; Sleep</h2>
@@ -651,6 +651,26 @@ const char PAGE[] PROGMEM = R"HTML(
           <div id="diagFetchResult" style="display:none;font-family:monospace;font-size:0.82rem;padding:8px;background:#f8faf9;border:1px solid var(--line);border-radius:6px;max-height:160px;overflow-y:auto;word-break:break-all;white-space:pre-wrap"></div>
         </div>
       </div>
+      <!-- === STAGE 1 BATTERY HW TEST - REMOVE AFTER VALIDATION === -->
+      <div class="card">
+        <h2>Battery Hardware Test <span style="font-size:0.75rem;color:var(--warn);font-weight:400">(temporary)</span></h2>
+        <div style="font-size:0.82rem;color:var(--muted);margin-bottom:10px">Smoke test only. Confirms voltage divider (D0/GPIO1) and LED (D5/GPIO6) wiring.</div>
+        <div class="cfg-section" style="margin-bottom:12px">
+          <label class="cfg-label">ADC Reading</label>
+          <div class="row" style="gap:8px;align-items:center">
+            <label><input type="checkbox" id="hwAdcLive" onchange="hwAdcLiveChanged()"> Live</label>
+          </div>
+          <div id="hwAdcResult" style="font-family:monospace;font-size:0.85rem;padding:6px 8px;background:#f8faf9;border:1px solid var(--line);border-radius:6px;color:var(--muted);margin-top:8px">--</div>
+        </div>
+        <div class="cfg-section" style="margin-bottom:0">
+          <label class="cfg-label">LED</label>
+          <div class="row" style="gap:8px;align-items:center">
+            <button id="hwLedBlinkBtn" onclick="hwLedBlink()">Blink LED</button>
+            <span id="hwLedStatus" style="font-size:0.85rem;color:var(--muted)"></span>
+          </div>
+        </div>
+      </div>
+      <!-- === END STAGE 1 BATTERY HW TEST === -->
       <div class="card">
         <h2>Device Control</h2>
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">
@@ -675,7 +695,7 @@ const char PAGE[] PROGMEM = R"HTML(
 
   </div><!-- /.wrap -->
 
-  <!-- Ã¢â€â‚¬Ã¢â€â‚¬ Apply & Run confirmation modal Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ -->
+  <!-- -- Apply & Run confirmation modal -- -->
   <div id="applyModal" class="modal-bg" onclick="modalBackdropClick(event,'applyModal')">
     <div class="modal">
       <h3>Exit &amp; Run</h3>
@@ -738,7 +758,7 @@ const char PAGE[] PROGMEM = R"HTML(
   </div>
 
   <script>
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Tab routing Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // -- Tab routing --
     var TABS = ['general', 'ble', 'actions', 'system'];
 
     function switchTab(name) {
@@ -756,7 +776,7 @@ const char PAGE[] PROGMEM = R"HTML(
       switchTab(TABS.indexOf(hash) >= 0 ? hash : 'general');
     })();
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ DOM refs & shared state Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // -- DOM refs & shared state --
     var elState   = document.getElementById('state');
     var elDevices = document.getElementById('devices');
     var elKeys    = document.getElementById('keys');
@@ -769,7 +789,7 @@ const char PAGE[] PROGMEM = R"HTML(
       if (type) elState.classList.add('state-' + type);
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ BLE scan Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // -- BLE scan --
     var scanRan = false;
 
     async function scan() {
@@ -872,7 +892,7 @@ const char PAGE[] PROGMEM = R"HTML(
       }
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Bonded device panel (BLE tab) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // -- Bonded device panel (BLE tab) --
     function renderBondedPanel(s) {
       var card = document.getElementById('bondedCard');
       var info = document.getElementById('bondedInfo');
@@ -912,7 +932,7 @@ const char PAGE[] PROGMEM = R"HTML(
       acts.appendChild(btnU);
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Header update Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // -- Header update --
     var gConnectFlashing = false;
 
     function updateHeader(s) {
@@ -939,7 +959,7 @@ const char PAGE[] PROGMEM = R"HTML(
       if (!currentBondedAddress) return;
       var btn = document.getElementById('connectBtn');
       gConnectFlashing = true;
-      btn.textContent = 'Connecting…';
+      btn.textContent = 'Connecting--';
       btn.classList.add('btn-flash-busy');
       btn.style.display = '';
       btn.disabled = true;
@@ -970,7 +990,7 @@ const char PAGE[] PROGMEM = R"HTML(
       }
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ BLE device actions Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // -- BLE device actions --
     async function pairDevice(address, name) {
       document.getElementById('bleDiscoveredSection').style.display = 'none';
       status('Pairing with ' + address + ' ...', 'busy');
@@ -1013,7 +1033,7 @@ const char PAGE[] PROGMEM = R"HTML(
       status('Disconnected');
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Sleep timeout Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // -- Sleep timeout --
     var currentSleepTimeoutMs = 10 * 60 * 1000;
 
     function renderSleepTimeout(timeoutMs) {
@@ -1043,7 +1063,7 @@ const char PAGE[] PROGMEM = R"HTML(
       }
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ WiFi networks Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // -- WiFi networks --
     var wifiNets = [];
 
     function renderWifiNetworks(nets) {
@@ -1145,7 +1165,7 @@ const char PAGE[] PROGMEM = R"HTML(
       document.getElementById('wifiScanSection').style.display = 'none';
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Base URLs Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // -- Base URLs --
     var baseUrlsList = [];
     var urlEditIndex = -1;
 
@@ -1239,7 +1259,7 @@ const char PAGE[] PROGMEM = R"HTML(
       }
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Button mappings Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // -- Button mappings --
     var capturing = false;
     var capturedKeyHex = '';
     var lastSeenKey = '';
@@ -1365,7 +1385,7 @@ const char PAGE[] PROGMEM = R"HTML(
       }
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Load all config Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // -- Load all config --
     // -- KOReader Event Picker ----------------------------------------------
     var koreaderEvents = null;
     var pickerMode = null;
@@ -1513,7 +1533,7 @@ const char PAGE[] PROGMEM = R"HTML(
       var html = '';
       if (q) {
         var filtered = koreaderEvents.filter(function(ev) {
-          return (ev.label + ' ' + ev.modifier + ' ' + ev.section).toLowerCase().indexOf(q) >= 0;
+          return (ev.label + ' ' + ev.modifier + ' ' + ev.section + ' ' + ev.path).toLowerCase().indexOf(q) >= 0;
         });
         if (!filtered.length) {
           list.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:0.9rem">No matches.</div>';
@@ -1606,7 +1626,7 @@ const char PAGE[] PROGMEM = R"HTML(
       renderMappings(c.mappings || []);
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ System: reboot / factory reset Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // -- System: reboot / factory reset --
     async function confirmReboot() {
       try {
         var r = await fetch('/reboot');
@@ -1647,7 +1667,7 @@ const char PAGE[] PROGMEM = R"HTML(
           stEl.style.color = 'var(--ok)';
           stEl.textContent = 'Connected to ' + data.ssid + ', IP ' + data.ip;
           // Auto-disconnect after 4 s so we don't leave APSTA mode running.
-          // Skip if test mode was entered in the meantime — it owns the STA.
+          // Skip if test mode was entered in the meantime -- it owns the STA.
           setTimeout(async function() {
             if (testModeActive) { return; }
             try { await fetch('/diag/sta/disconnect'); } catch (_) {}
@@ -1699,8 +1719,50 @@ const char PAGE[] PROGMEM = R"HTML(
       }
       fetchBtn.disabled = false;
     }
+    // === STAGE 1 BATTERY HW TEST - REMOVE AFTER VALIDATION ===
+    var hwAdcTimer = null;
+    function hwAdcLiveChanged() {
+      var cb = document.getElementById('hwAdcLive');
+      if (cb.checked) {
+        hwAdcPoll();
+        hwAdcTimer = setInterval(hwAdcPoll, 1000);
+      } else {
+        if (hwAdcTimer) { clearInterval(hwAdcTimer); hwAdcTimer = null; }
+      }
+    }
+    async function hwAdcPoll() {
+      var el = document.getElementById('hwAdcResult');
+      try {
+        var r = await fetch('/check/adc');
+        var d = await r.json();
+        el.style.color = 'var(--ink)';
+        el.textContent = 'raw: ' + d.raw + '  \u2192  ' + d.millivolts + ' mV';
+      } catch (e) {
+        el.style.color = 'var(--warn)';
+        el.textContent = 'Error: ' + e.message;
+      }
+    }
+    async function hwLedBlink() {
+      var btn = document.getElementById('hwLedBlinkBtn');
+      var st  = document.getElementById('hwLedStatus');
+      btn.disabled = true;
+      st.style.color = 'var(--muted)';
+      st.textContent = 'Blinking\u2026';
+      try {
+        var r = await fetch('/check/led-blink');
+        var d = await r.json();
+        st.style.color = d.ok ? 'var(--ok)' : 'var(--warn)';
+        st.textContent = d.ok ? 'Done' : 'Error';
+      } catch (e) {
+        st.style.color = 'var(--warn)';
+        st.textContent = 'Error: ' + e.message;
+      }
+      btn.disabled = false;
+    }
+    // === END STAGE 1 BATTERY HW TEST ===
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Apply & Run modal Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+
+    // -- Apply & Run modal --
     // -- Modal helpers
     function showModal(id) {
       document.getElementById(id).classList.add('open');
@@ -1763,7 +1825,7 @@ const char PAGE[] PROGMEM = R"HTML(
       }
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Poll: refreshState Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // -- Poll: refreshState --
     async function refreshState() {
       var r = await fetch('/state');
       var s = await r.json();
