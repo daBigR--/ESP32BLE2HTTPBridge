@@ -88,6 +88,9 @@
 #include "web_ble_api.h"    // HTTP routes that expose BLE operations to the web UI
 #include "web_config_api.h" // HTTP routes that expose configuration to the web UI
 #include "web_page.h"       // Const C-string containing the single-page web UI HTML
+// === STAGE 2 ULP TEST - REMOVE AFTER VALIDATION ===
+#include "stage2_ulp_blink_test.h"
+// === END STAGE 2 ULP TEST ===
 
 // Standard Bluetooth SIG UUIDs for the HID profile.
 // 0x1812 = Human Interface Device service.
@@ -761,6 +764,9 @@ void enterDeepSleep() {
     return;
   }
 
+  // === STAGE 2 ULP TEST - REMOVE AFTER VALIDATION ===
+  ulpBlinkArm();
+  // === END STAGE 2 ULP TEST ===
   delay(50);
   Serial.flush();
   esp_deep_sleep_start();
@@ -1021,6 +1027,24 @@ void setup() {
   startSelectedMode();
   waitForSerialMonitorAttach();
   printLateStartupSummary();
+
+  // === STAGE 2 ULP TEST - REMOVE AFTER VALIDATION ===
+  // HW SANITY: drive GPIO21 LOW for 3 s to confirm built-in USER LED wiring.
+  // Active LOW: LOW = on, HIGH = off.
+  // If LED does not light here, the hardware assumption is wrong.
+  pinMode(21, OUTPUT);
+  digitalWrite(21, LOW);   // ON
+  delay(3000);
+  digitalWrite(21, HIGH);  // OFF
+  pinMode(21, INPUT);  // release pin before handing to RTC mux
+
+  // Stop BEFORE init: init does memset(RTC_SLOW_MEM) which would wipe the
+  // ULP run counter before ulpBlinkStop() can read and log it.
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
+    ulpBlinkStop();
+  }
+  ulpBlinkInit();
+  // === END STAGE 2 ULP TEST ===
 
   markUserActivity();
 }

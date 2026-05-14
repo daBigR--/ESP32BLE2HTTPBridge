@@ -1,5 +1,12 @@
 # TODO
 
+## Issues
+
+- [ ] **Clash between test-connection and concurrent fetch**: a conflict occurs when
+      "test connection" and an active HTTP fetch run simultaneously. Root cause not yet
+      investigated. Check for shared state or mutex contention in `http_bridge` /
+      `net_fetch`. Reproduce reliably before fixing.
+
 ## High Priority
 
 - [x] **Device validation sweep**: all devices pairing, connecting, and subscribing
