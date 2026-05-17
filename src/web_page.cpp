@@ -651,26 +651,7 @@ const char PAGE[] PROGMEM = R"HTML(
           <div id="diagFetchResult" style="display:none;font-family:monospace;font-size:0.82rem;padding:8px;background:#f8faf9;border:1px solid var(--line);border-radius:6px;max-height:160px;overflow-y:auto;word-break:break-all;white-space:pre-wrap"></div>
         </div>
       </div>
-      <!-- === STAGE 1 BATTERY HW TEST - REMOVE AFTER VALIDATION === -->
-      <div class="card">
-        <h2>Battery Hardware Test <span style="font-size:0.75rem;color:var(--warn);font-weight:400">(temporary)</span></h2>
-        <div style="font-size:0.82rem;color:var(--muted);margin-bottom:10px">Smoke test only. Confirms voltage divider (D0/GPIO1) and LED (D5/GPIO6) wiring.</div>
-        <div class="cfg-section" style="margin-bottom:12px">
-          <label class="cfg-label">ADC Reading</label>
-          <div class="row" style="gap:8px;align-items:center">
-            <label><input type="checkbox" id="hwAdcLive" onchange="hwAdcLiveChanged()"> Live</label>
-          </div>
-          <div id="hwAdcResult" style="font-family:monospace;font-size:0.85rem;padding:6px 8px;background:#f8faf9;border:1px solid var(--line);border-radius:6px;color:var(--muted);margin-top:8px">--</div>
-        </div>
-        <div class="cfg-section" style="margin-bottom:0">
-          <label class="cfg-label">LED</label>
-          <div class="row" style="gap:8px;align-items:center">
-            <button id="hwLedBlinkBtn" onclick="hwLedBlink()">Blink LED</button>
-            <span id="hwLedStatus" style="font-size:0.85rem;color:var(--muted)"></span>
-          </div>
-        </div>
-      </div>
-      <!-- === END STAGE 1 BATTERY HW TEST === -->
+
       <div class="card">
         <h2>Device Control</h2>
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">
@@ -1719,47 +1700,6 @@ const char PAGE[] PROGMEM = R"HTML(
       }
       fetchBtn.disabled = false;
     }
-    // === STAGE 1 BATTERY HW TEST - REMOVE AFTER VALIDATION ===
-    var hwAdcTimer = null;
-    function hwAdcLiveChanged() {
-      var cb = document.getElementById('hwAdcLive');
-      if (cb.checked) {
-        hwAdcPoll();
-        hwAdcTimer = setInterval(hwAdcPoll, 1000);
-      } else {
-        if (hwAdcTimer) { clearInterval(hwAdcTimer); hwAdcTimer = null; }
-      }
-    }
-    async function hwAdcPoll() {
-      var el = document.getElementById('hwAdcResult');
-      try {
-        var r = await fetch('/check/adc');
-        var d = await r.json();
-        el.style.color = 'var(--ink)';
-        el.textContent = 'raw: ' + d.raw + '  \u2192  ' + d.millivolts + ' mV';
-      } catch (e) {
-        el.style.color = 'var(--warn)';
-        el.textContent = 'Error: ' + e.message;
-      }
-    }
-    async function hwLedBlink() {
-      var btn = document.getElementById('hwLedBlinkBtn');
-      var st  = document.getElementById('hwLedStatus');
-      btn.disabled = true;
-      st.style.color = 'var(--muted)';
-      st.textContent = 'Blinking\u2026';
-      try {
-        var r = await fetch('/check/led-blink');
-        var d = await r.json();
-        st.style.color = d.ok ? 'var(--ok)' : 'var(--warn)';
-        st.textContent = d.ok ? 'Done' : 'Error';
-      } catch (e) {
-        st.style.color = 'var(--warn)';
-        st.textContent = 'Error: ' + e.message;
-      }
-      btn.disabled = false;
-    }
-    // === END STAGE 1 BATTERY HW TEST ===
 
 
     // -- Apply & Run modal --

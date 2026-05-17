@@ -88,9 +88,9 @@
 #include "web_ble_api.h"    // HTTP routes that expose BLE operations to the web UI
 #include "web_config_api.h" // HTTP routes that expose configuration to the web UI
 #include "web_page.h"       // Const C-string containing the single-page web UI HTML
-// === STAGE 2 ULP TEST - REMOVE AFTER VALIDATION ===
-#include "stage2_ulp_blink_test.h"
-// === END STAGE 2 ULP TEST ===
+// === STAGE 3a ULP BATTERY MONITOR ===
+#include "battery_monitor.h" // ULP-FSM battery voltage monitor (D0 ADC + D5 LED)
+// === END STAGE 3a ULP BATTERY MONITOR ===
 
 // Standard Bluetooth SIG UUIDs for the HID profile.
 // 0x1812 = Human Interface Device service.
@@ -143,11 +143,11 @@ static bool gConfigMode = true;
 static const uint8_t CONFIG_BUTTON_PIN = D10;
 static const uint8_t RUNTIME_BUTTON_PIN = CONFIG_BUTTON_PIN;
 
-// USB-present sense input from external divider on D7.
+// USB-present sense input from external divider on D8.
 // Divider expected behavior:
 //   USB present (VBUS=5V)  -> pin HIGH (~2.5V with 100k/100k)
 //   USB absent             -> pin LOW
-static const uint8_t USB_SENSE_PIN = D7;
+static const uint8_t USB_SENSE_PIN = D8;
 
 // ---------------------------------------------------------------------------
 // Config-mode entry: button hold threshold
@@ -279,7 +279,7 @@ void   handleConfigButton();
 void   markUserActivity();
 bool   isRunningOnBattery();
 void   maybeEnterDeepSleep();
-void   enterDeepSleep();
+void   enterDeepSleep(bool forcedByButton = false);
 const char* wakeupCauseToText(esp_sleep_wakeup_cause_t cause);
 const char* powerSourceToText();
 void   initPinsAndLedTask();
@@ -469,7 +469,7 @@ void handleButton() {
           delay(200);
           esp_restart();
         } else if (held >= URL_BTN_LONG_PRESS_MS) {
-          enterDeepSleep();           // button already released — guard will pass
+          enterDeepSleep(true);       // button already released — guard will pass
           gBtnState = BTN_IDLE;
         } else if (held >= URL_BTN_DEBOUNCE_MS) {
           gBtnReleaseMs = now;        // start double-press window
@@ -700,7 +700,7 @@ void markUserActivity() {
 }
 
 // ---------------------------------------------------------------------------
-// isRunningOnBattery — true when USB 5V is not detected on D7
+// isRunningOnBattery — true when USB 5V is not detected on D8
 // ---------------------------------------------------------------------------
 bool isRunningOnBattery() {
   return digitalRead(USB_SENSE_PIN) == LOW;
@@ -733,7 +733,7 @@ const char* wakeupCauseToText(esp_sleep_wakeup_cause_t cause) {
 // ---------------------------------------------------------------------------
 // enterDeepSleep — configure wake source and start deep sleep
 // ---------------------------------------------------------------------------
-void enterDeepSleep() {
+void enterDeepSleep(bool forcedByButton) {
   // Guard: only sleep when wake button is released and stable HIGH.
   unsigned long stableStart = millis();
   while (millis() - stableStart < SLEEP_ENTRY_RELEASE_STABLE_MS) {
@@ -744,7 +744,9 @@ void enterDeepSleep() {
     delay(2);
   }
 
-  KeyLog::add(String("Entering deep sleep after ") + String(gSleepTimeoutMs) + String(" ms inactivity"));
+  KeyLog::add(forcedByButton
+    ? String("Entering deep sleep: forced by button press")
+    : String("Entering deep sleep after ") + String(gSleepTimeoutMs) + String(" ms inactivity"));
   BLEKeyboard::disconnectKeyboard();
 
   // Keep wake pin biased HIGH in deep sleep to avoid floating-trigger wake.
@@ -764,9 +766,6 @@ void enterDeepSleep() {
     return;
   }
 
-  // === STAGE 2 ULP TEST - REMOVE AFTER VALIDATION ===
-  ulpBlinkArm();
-  // === END STAGE 2 ULP TEST ===
   delay(50);
   Serial.flush();
   esp_deep_sleep_start();
@@ -1028,23 +1027,9 @@ void setup() {
   waitForSerialMonitorAttach();
   printLateStartupSummary();
 
-  // === STAGE 2 ULP TEST - REMOVE AFTER VALIDATION ===
-  // HW SANITY: drive GPIO21 LOW for 3 s to confirm built-in USER LED wiring.
-  // Active LOW: LOW = on, HIGH = off.
-  // If LED does not light here, the hardware assumption is wrong.
-  pinMode(21, OUTPUT);
-  digitalWrite(21, LOW);   // ON
-  delay(3000);
-  digitalWrite(21, HIGH);  // OFF
-  pinMode(21, INPUT);  // release pin before handing to RTC mux
-
-  // Stop BEFORE init: init does memset(RTC_SLOW_MEM) which would wipe the
-  // ULP run counter before ulpBlinkStop() can read and log it.
-  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
-    ulpBlinkStop();
-  }
-  ulpBlinkInit();
-  // === END STAGE 2 ULP TEST ===
+  // === STAGE 3a ULP BATTERY MONITOR ===
+  batteryMonitorInit();
+  // === END STAGE 3a ULP BATTERY MONITOR ===
 
   markUserActivity();
 }
@@ -1098,6 +1083,15 @@ void loop() {
     // Enter deep sleep after prolonged inactivity in battery mode.
     maybeEnterDeepSleep();
   }
+
+
+  // === STAGE 3a TEMPORARY TRACE — remove after validation ===
+  static unsigned long lastBatDiag = 0;
+  if (millis() - lastBatDiag > 2000) {
+    lastBatDiag = millis();
+    batteryMonitorDiag();
+  }
+  // === END STAGE 3a TEMPORARY TRACE ===
 
   // Yield to the FreeRTOS scheduler.  Without at least a 1 ms yield the
   // idle task on Core 1 never runs, preventing the watchdog from being

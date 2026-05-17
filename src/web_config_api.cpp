@@ -598,35 +598,7 @@ void registerRoutes(WebServer& server, const Context& ctx) {
       + String(",\"sig\":\"")          + JsonUtil::escape(sig)         + String("\"")
       + String(",\"error\":\"")        + JsonUtil::escape(resp.error)  + String("\"}"));
   });
-  // === STAGE 1 BATTERY HW TEST - REMOVE AFTER VALIDATION ===
 
-  // ---- GET /check/adc -------------------------------------------------------
-  // Single raw ADC read from D0 (GPIO1, battery voltage divider tap).
-  // 12-bit resolution, 11 dB attenuation (0-3.3 V input range).
-  // millivolts = raw * 6600 / 4095  (integer-safe; factor of 2 for the 2:1 divider).
-  server.on("/check/adc", HTTP_GET, [&server]() {
-    analogSetAttenuation(ADC_11db);
-    int raw = analogRead(D0);
-    int mv  = (int)((long)raw * 6600 / 4095);
-    server.send(200, "application/json",
-      String("{\"raw\":") + String(raw)
-      + String(",\"millivolts\":") + String(mv) + String("}"));
-  });
-
-  // ---- GET /check/led-blink -------------------------------------------------
-  // Blinks D5 (GPIO6, battery status LED) 3x 200 ms ON / 200 ms OFF.
-  // Restores pin to INPUT (Hi-Z) on exit.
-  server.on("/check/led-blink", HTTP_GET, [&server]() {
-    pinMode(D5, OUTPUT);
-    for (int i = 0; i < 3; i++) {
-      digitalWrite(D5, HIGH); delay(200);
-      digitalWrite(D5, LOW);  delay(200);
-    }
-    pinMode(D5, INPUT);
-    server.send(200, "application/json", "{\"ok\":true}");
-  });
-
-  // === END STAGE 1 BATTERY HW TEST ===
 }
 
 } // namespace WebConfigApi
